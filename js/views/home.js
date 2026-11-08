@@ -1,0 +1,116 @@
+// Pantalla de inicio: lo que está pasando ahora y accesos rápidos.
+import { store } from '../store.js';
+import { h, section, emptyState, toast, pickOne, button } from '../ui.js';
+import { icon } from '../icons.js';
+import * as R from '../rules.js';
+import * as F from '../forms.js';
+import { laborCard, cargaCard, cropBadge, estadoChip, siloCard, statBox, card } from './shared.js';
+import { laborButtons, cargaButtons } from './actions.js';
+import { fmtKg, fmtL, fmtDur, fmtHa, fmtDate, relDay, fmt0, todayStr } from '../util.js';
+
+const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+function greeting() {
+  const hr = new Date().getHours();
+  return hr < 6 ? 'Buenas noches' : hr < 13 ? 'Buen día' : hr < 20 ? 'Buenas tardes' : 'Buenas noches';
+}
+
+function installNudge() {
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const standalone = window.navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+  let dismissed = false;
+  try { dismissed = localStorage.getItem('de-install-dismissed') === '1'; } catch {}
+  if (!ios || standalone || dismissed) return null;
+  const el = h('div', { class: 'nudge' },
+    icon('share', 22),
+    h('div', { class: 'grow' }, h('b', null, 'Instalá la app en tu iPhone'), h('p', null, 'Tocá Compartir y después "Añadir a pantalla de inicio". Así abre a pantalla completa y anda sin señal.')),
+    h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Ocultar', onclick: () => { try { localStorage.setItem('de-install-dismissed', '1'); } catch {} el.remove(); } }, icon('close', 18)));
+  return el;
+}
+
+export function render({ go, book }) {
+  const now = new Date();
+  const abiertas = R.laboresAbiertas(book);
+  const cargas = R.cargasEnCurso(book);
+  const pend = R.cargasPendientesTicket(book);
+  const comb = R.combustibleResumen(book);
+  const lastLabs = R.recientes(book).slice(0, 5);
+  const silos = book.silos.filter((s) => s['Estado'] !== 'Inactivo');
+  const stockTotal = silos.reduce((a, s) => a + R.siloView(s, book).stock, 0);
+
+  const hero = h('div', { class: 'hero' },
+    h('div', { class: 'hero-art', 'aria-hidden': 'true' }, furrows()),
+    h('p', { class: 'eyebrow' }, `${DIAS[now.getDay()]} ${now.getDate()} de ${MESES[now.getMonth()]}`),
+    h('h1', null, greeting(), '.'),
+    h('div', { class: 'hero-stats' },
+      h('button', { type: 'button', class: 'hs', onclick: () => go('labores') }, h('b', null, abiertas.length), h('span', null, abiertas.length === 1 ? 'labor abierta' : 'labores abiertas')),
+      h('button', { type: 'button', class: 'hs', onclick: () => go('cosecha') }, h('b', null, cargas.length), h('span', null, cargas.length === 1 ? 'camión cargando' : 'camiones cargando')),
+      h('button', { type: 'button', class: 'hs', onclick: () => go('cosecha') }, h('b', null, pend.length), h('span', null, pend.length === 1 ? 'ticket pendiente' : 'tickets pendientes'))));
+
+  const quick = h('div', { class: 'quick' },
+    quickBtn('tractor', 'Iniciar labor', () => F.laborForm(book)),
+    quickBtn('truck', 'Nueva carga', () => F.cargaForm(book)),
+    quickBtn('fuel', 'Cargar combustible', () => F.combustibleForm(book)),
+    quickBtn('silo', 'Entrada a silo', async () => {
+      const opts = F.siloOptions(book);
+      if (!opts.length) { toast('Todavía no hay silos cargados', 'info'); return; }
+      const id = opts.length === 1 ? opts[0].value : await pickOne({ title: '¿A qué silo entra?', options: opts });
+      if (id) F.entradaSiloForm(book.silos.find((s) => s['ID silo'] === id));
+    }));
+
+  const marcha = [];
+  for (const l of abiertas) marcha.push(h('div', { class: 'live-card' },
+    h('div', { class: 'row-top', onclick: () => go(`labores/${encodeURIComponent(l['ID labor'])}`), role: 'button', tabindex: '0' },
+      cropBadge(l['Cultivo'], l['Tarea'] === 'Cosecha' ? 'wheat' : 'tractor'),
+      h('div', { class: 'grow' }, h('div', { class: 'title-line' }, h('b', { class: 'ct' }, `${l['Tarea']}${l['Cultivo'] ? ' · ' + l['Cultivo'] : ''}`), estadoChip(l['Estado labor'])), h('div', { class: 'sub' }, R.laborPlace(l))),
+      icon('right', 20)),
+    h('div', { class: 'live-time' }, icon('clock', 18), h('b', null, fmtDur(R.laborHoras(l))), h('span', null, l['Estado labor'] === 'Pausada' ? 'trabajadas (en pausa)' : 'trabajadas'), l['Hora inicio'] ? h('em', null, `desde ${relDay(l['Fecha inicio'])} ${l['Hora inicio']}`) : null),
+    laborButtons(l)));
+  for (const c of cargas) marcha.push(h('div', { class: 'live-card' }, cargaCard(c, book, () => go(`cosecha/${encodeURIComponent(c['ID carga'])}`)), cargaButtons(c)));
+
+  const tanques = h('div', { class: 'card tap-card', onclick: () => go('combustible'), role: 'button', tabindex: '0' },
+    h('div', { class: 'tank-row' },
+      tank('Tanque fijo', comb.fijo, comb.capFijo),
+      tank('Tanque móvil', comb.movil, comb.capMovil)),
+    h('div', { class: 'meta' }, h('span', null, icon('drop', 15), `Stock general ${fmtL(comb.general)}`)));
+
+  return {
+    node: h('div', { class: 'page' },
+      hero,
+      installNudge(),
+      quick,
+      section('En marcha', marcha.length ? marcha : card([emptyState('tractor', 'Nada en marcha', 'No hay labores ni camiones abiertos ahora.')])),
+      pend.length ? section('Tickets pendientes', h('button', { type: 'button', class: 'card tap row-flex', onclick: () => go('cosecha') }, h('span', { class: 'crop crop-warn' }, icon('ticket', 22)), h('div', { class: 'grow' }, h('b', null, `${pend.length} ${pend.length === 1 ? 'camión espera' : 'camiones esperan'} el ticket`), h('div', { class: 'sub' }, 'Cargá el ticket para conciliar los kilos')), icon('right', 20))) : null,
+      section('Combustible', tanques),
+      silos.length ? section('Silos', h('div', { class: 'card tap-card', onclick: () => go('silos'), role: 'button', tabindex: '0' }, h('div', { class: 'row-top' }, h('span', { class: 'crop crop-silo' }, icon('silo', 24)), h('div', { class: 'grow' }, h('b', { class: 'ct' }, 'Stock en silos'), h('div', { class: 'sub' }, `${silos.length} ${silos.length === 1 ? 'silo activo' : 'silos activos'}`)), h('div', { class: 'big-num' }, fmtKg(stockTotal))))) : null,
+      section('Últimas labores', lastLabs.length ? lastLabs.map((l) => laborCard(l, () => go(`labores/${encodeURIComponent(l['ID labor'])}`))) : card([emptyState('tractor', 'Todavía no hay labores', 'Iniciá la primera con el botón de arriba.')]),
+        lastLabs.length ? h('div', { class: 'center' }, button({ label: `Ver todas (${book.labores.length})`, tone: 'ghost', onClick: () => go('labores') })) : null),
+    ),
+    fab: { label: 'Iniciar labor', ic: 'plus', onClick: () => F.laborForm(book) },
+  };
+}
+
+function quickBtn(ic, label, onClick) {
+  return h('button', { type: 'button', class: 'q', onclick: onClick }, h('span', { class: 'q-ic' }, icon(ic, 26)), h('span', null, label));
+}
+function tank(name, litros, cap) {
+  const pct = cap ? Math.max(0, Math.min(100, Math.round((litros / cap) * 100))) : null;
+  return h('div', { class: 'tank' },
+    h('div', { class: 'tank-top' }, h('span', null, name), h('b', null, fmtL(litros))),
+    h('div', { class: `gauge slim${litros < 0 ? ' neg' : ''}`, role: 'img', 'aria-label': pct === null ? name : `${name} ${pct}%` }, h('i', { style: { width: (pct === null ? 0 : pct) + '%' } })),
+    h('small', null, cap ? `${pct}% de ${fmt0(cap)} L` : 'Capacidad sin cargar'));
+}
+
+function furrows() {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  // El dibujo tiene tamaño fijo (400 x 190 px) y queda pegado a la derecha: el horizonte (y = 96) no depende del ancho de la pantalla,
+  // así el saludo siempre queda arriba de la línea. La línea y la tierra se extienden hacia la izquierda con overflow visible.
+  s.setAttribute('viewBox', '0 0 400 190');
+  s.innerHTML = '<defs><linearGradient id="sun" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f7cf6b"/><stop offset="1" stop-color="#e3921d"/></linearGradient>' +
+    '<linearGradient id="soilfade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0c3324" stop-opacity=".6"/><stop offset="1" stop-color="#0c3324" stop-opacity="0"/></linearGradient></defs>' +
+    '<circle cx="322" cy="96" r="30" fill="url(#sun)" opacity=".95"/><rect x="-2000" y="96" width="4400" height="94" fill="url(#soilfade)"/>' +
+    '<g stroke="#f6efdc" stroke-width="1.3" stroke-linecap="round" opacity=".3"><path d="M322 96 132 190M322 96 198 190M322 96 264 190M322 96 322 190M322 96 380 190M322 96 447 190"/></g>' +
+    '<path d="M-2000 96H2400" stroke="#f6efdc" opacity=".28"/>';
+  return s;
+}

@@ -1,0 +1,443 @@
+// Formularios de la app (misma lógica de campos visibles / obligatorios que AppSheet).
+import { store } from './store.js';
+import { openForm, confirmDialog, toast } from './ui.js';
+import * as R from './rules.js';
+import { todayStr, nowTime, uid8, isBlank, splitList, joinList, unique, sortEs, fmtKg, fmtDate, norm } from './util.js';
+import { emptyRow } from './model.js';
+import { TABLES } from './schema.js';
+
+const compact = (rec) => Object.fromEntries(Object.entries(rec).filter(([, v]) => !(v === '' || v === null || v === undefined)));
+const L = (book, k) => book.cfg[k] || [];
+const SI_NO = ['Sí', 'No'];
+
+export function lotOptions(book) {
+  return [...book.lotes]
+    .sort((a, b) => `${a['Campo']} ${a['Lote físico']}`.localeCompare(`${b['Campo']} ${b['Lote físico']}`, 'es'))
+    .map((l) => ({ value: l['ID lote'], label: R.lotLabel(l), sub: `${l['Unidad']}${l['Ha físicas'] ? ' · ' + l['Ha físicas'] + ' ha' : ''}` }));
+}
+export function laborOptions(book, { onlyCosecha = false } = {}) {
+  return [...book.labores].filter((l) => !onlyCosecha || l['Tarea'] === 'Cosecha')
+    .sort((a, b) => (b['Fecha inicio'] + (b['Hora inicio'] || '')).localeCompare(a['Fecha inicio'] + (a['Hora inicio'] || '')))
+    .map((l) => ({ value: l['ID labor'], label: R.laborTitle(l), sub: `${fmtDate(l['Fecha inicio'])} · ${l['Estado labor']}` }));
+}
+export function prodOptions(book) {
+  return [...book.prod].sort((a, b) => (b['Fecha inicio cosecha'] || '').localeCompare(a['Fecha inicio cosecha'] || ''))
+    .map((p) => ({ value: p['ID producción'], label: R.prodName(p), sub: fmtDate(p['Fecha inicio cosecha']) }));
+}
+export function siloOptions(book, { active = true } = {}) {
+  return book.silos.filter((s) => !active || s['Estado'] !== 'Inactivo').map((s) => ({ value: s['ID silo'], label: s['Nombre silo'] || s['ID silo'], sub: s['Tipo'] }));
+}
+const campOpts = (book) => unique([...L(book, 'Campañas'), '2027/28']).filter(Boolean);
+const estadoDato = (book) => L(book, 'Estado dato');
+
+// ===================================================================== LABORES
+export function laborForm(book, { mode = 'curso', labor = null } = {}) {
+  const edit = mode === 'editar';
+  const manual = mode === 'manual' || edit;
+  const v0 = labor ? {
+    ...labor,
+    'Operadores principales': splitList(labor['Operadores principales']),
+    'Equipos de apoyo': splitList(labor['Equipos de apoyo']),
+    'Operadores de apoyo': splitList(labor['Operadores de apoyo']),
+  } : { 'Campaña': R.suggestCampaign({ tarea: '', cultivo: '' }), 'Estado dato': 'Confirmado', 'Fecha inicio': todayStr(), 'Hora inicio': nowTime(), 'Estado labor': 'En curso' };
+  if (mode === 'manual') { v0['Estado labor'] = 'Terminado'; v0['Fecha fin'] = todayStr(); v0['Hora fin'] = nowTime(); }
+  if (labor) v0._camp = true;
+  const isT = (...t) => (v) => t.includes(v['Tarea']);
+  const reqCampo = (v) => R.TAREAS_CAMPO.includes(v['Tarea']);
+  const machineTasks = ['Siembra', 'Cosecha', 'Pulverización', 'Fertilización', 'Traslado', 'Mantenimiento', 'Carga de combustible', 'Entrega de cereal'];
+  const sugCamp = (v, set) => { if (!v._camp) set('Campaña', R.suggestCampaign({ tarea: v['Tarea'], cultivo: v['Cultivo'], fecha: v['Fecha inicio'] })); };
+
+  const fields = [
+    { name: 'Tarea', label: 'Tarea', type: 'chips', options: L(book, 'Tareas'), required: true, onChange: (v, set) => { sugCamp(v, set); } },
+    { name: 'ID lote vinculado', label: 'Lote', type: 'ref', options: lotOptions(book), required: reqCampo, show: (v) => !!v['ID lote vinculado'] || ['Siembra', 'Cosecha', 'Pulverización', 'Fertilización', 'Traslado', 'Entrega de cereal', 'Otra'].includes(v['Tarea']), placeholder: 'Elegir campo y lote…' },
+    { name: 'Cultivo', label: 'Cultivo', type: 'chips', options: L(book, 'Cultivos'), required: reqCampo, show: (v) => !!v['Cultivo'] || ['Siembra', 'Cosecha', 'Pulverización', 'Fertilización', 'Entrega de cereal', 'Venta de cereal'].includes(v['Tarea']), onChange: (v, set) => sugCamp(v, set) },
+    { name: 'Variedad / híbrido', label: 'Variedad / híbrido', type: 'text', show: isT('Siembra', 'Cosecha'), placeholder: 'Opcional' },
+    { name: 'Máquina principal', label: 'Máquina principal', type: 'select', options: () => R.machineOptions(book), required: reqCampo, show: isT(...machineTasks) },
+    { name: 'Implemento / equipo', label: 'Implemento / equipo', type: 'select', options: (v) => R.implementOptions(book, v['Tarea']), required: reqCampo, show: isT('Siembra', 'Cosecha', 'Pulverización', 'Fertilización', 'Mantenimiento', 'Traslado') },
+    { name: 'Operadores principales', label: 'Operadores principales', type: 'multi', options: () => L(book, 'Operadores'), required: isT(...machineTasks), show: (v) => (v['Operadores principales'] || []).length > 0 || machineTasks.includes(v['Tarea']) },
+    { name: 'Equipos de apoyo', label: 'Equipos de apoyo', type: 'multi', options: () => R.supportEquipOptions(book), show: isT('Siembra', 'Cosecha', 'Pulverización', 'Fertilización', 'Traslado', 'Carga de combustible', 'Entrega de cereal') },
+    { name: 'Operadores de apoyo', label: 'Operadores de apoyo', type: 'multi', options: () => L(book, 'Operadores'), show: (v) => (v['Operadores de apoyo'] || []).length > 0 || machineTasks.includes(v['Tarea']) },
+    { type: 'section', label: 'Datos de la campaña' },
+    { name: 'Campaña', label: 'Campaña', type: 'select', options: () => campOpts(book), required: true, onChange: (v, set, nv) => { set('_camp', true); } },
+  ];
+  if (manual) {
+    fields.push(
+      { type: 'section', label: 'Fechas y resultados' },
+      { name: 'Fecha inicio', label: 'Fecha de inicio', type: 'date', required: true },
+      { name: 'Hora inicio', label: 'Hora de inicio', type: 'time', required: true },
+      { name: 'Fecha fin', label: 'Fecha de fin', type: 'date' },
+      { name: 'Hora fin', label: 'Hora de fin', type: 'time' },
+      { name: 'Pausas / demoras h', label: 'Pausas y demoras', type: 'dur', hint: 'Tiempo total parado, en horas y minutos (ej. 1:30)' },
+      { name: 'Ha realizadas', label: 'Hectáreas realizadas', type: 'number', unit: 'ha', valid: (v, x) => (x < 0 ? 'No puede ser negativo' : null) },
+      { name: 'Estado labor', label: 'Estado de la labor', type: 'select', options: ['Planificado', 'En curso', 'Pausada', 'Terminado', 'Suspendido', 'Reprogramado', 'Cancelado'], required: true },
+      { name: 'Estado dato', label: 'Estado del dato', type: 'chips', options: () => estadoDato(book), required: true },
+    );
+    if (edit) fields.push({ name: 'Coeficiente combustible L/ha', label: 'Coeficiente de combustible', type: 'number', unit: 'L/ha' });
+  }
+  fields.push({ name: 'Novedades', label: 'Novedades', type: 'textarea', required: (v) => v['Tarea'] === 'Otra', placeholder: 'Roturas, observaciones, lo que haya pasado…' });
+
+  return openForm({
+    title: edit ? 'Editar labor' : mode === 'manual' ? 'Cargar labor terminada' : 'Iniciar labor',
+    subtitle: edit ? null : mode === 'manual' ? 'Para registrar un trabajo que ya se hizo.' : 'Se registra con la fecha y hora de ahora. Después podés pausarla y finalizarla.',
+    submitLabel: edit ? 'Guardar cambios' : mode === 'manual' ? 'Guardar labor' : 'Iniciar ahora',
+    fields, values: v0,
+    onSubmit: async (v) => {
+      const lote = v['ID lote vinculado'] ? book.lotes.find((l) => l['ID lote'] === v['ID lote vinculado']) : null;
+      const open = ['En curso', 'Pausada'].includes(v['Estado labor']);
+      const busy = open ? R.machineBusy(book, v['Máquina principal'], labor && labor['ID labor']) : null;
+      if (busy && !(await confirmDialog({ title: 'La máquina ya está en uso', message: `${v['Máquina principal']} tiene abierta la labor "${R.laborTitle(busy)}" del ${fmtDate(busy['Fecha inicio'])}. ¿Querés iniciar esta igual?`, confirmLabel: 'Iniciar igual' }))) return false;
+      const base = {
+        'Campaña': v['Campaña'], 'Tarea': v['Tarea'], 'Cultivo': v['Cultivo'] || '', 'Variedad / híbrido': v['Variedad / híbrido'] || '',
+        'Máquina principal': v['Máquina principal'] || '', 'Implemento / equipo': v['Implemento / equipo'] || '',
+        'Operadores principales': joinList(v['Operadores principales']), 'Equipos de apoyo': joinList(v['Equipos de apoyo']),
+        'Operadores de apoyo': joinList(v['Operadores de apoyo']), 'Novedades': v['Novedades'] || '',
+        'ID lote vinculado': v['ID lote vinculado'] || '',
+        ...(lote ? { 'Unidad': lote['Unidad'], 'Campo / cliente': lote['Campo'], 'Lote': lote['Lote físico'] } : {}),
+      };
+      if (manual) Object.assign(base, {
+        'Fecha inicio': v['Fecha inicio'], 'Hora inicio': v['Hora inicio'], 'Fecha fin': v['Fecha fin'] || '', 'Hora fin': v['Hora fin'] || '',
+        'Pausas / demoras h': isBlank(v['Pausas / demoras h']) ? null : v['Pausas / demoras h'], 'Ha realizadas': isBlank(v['Ha realizadas']) ? null : v['Ha realizadas'],
+        'Estado labor': v['Estado labor'], 'Estado dato': v['Estado dato'],
+        ...(edit ? { 'Coeficiente combustible L/ha': isBlank(v['Coeficiente combustible L/ha']) ? null : v['Coeficiente combustible L/ha'] } : {}),
+      });
+      if (edit) {
+        const set = {};
+        for (const [k, val] of Object.entries(base)) {
+          const old = labor[k];
+          if ((isBlank(old) && isBlank(val)) || old === val) continue;
+          set[k] = val;
+        }
+        if (!Object.keys(set).length) { toast('No hubo cambios', 'info'); return; }
+        await store.enqueue([{ t: 'update', tk: 'labores', key: labor['ID labor'], set }]);
+        toast('Cambios guardados');
+      } else {
+        const rec = compact({
+          'ID labor': uid8(), ...base,
+          ...(manual ? {} : { 'Fecha inicio': todayStr(), 'Hora inicio': nowTime(), 'Estado labor': 'En curso', 'Estado dato': 'Confirmado' }),
+        });
+        await store.enqueue([{ t: 'append', tk: 'labores', rec: { ...emptyRow('labores'), ...rec } }]);
+        toast(manual ? 'Labor guardada' : 'Labor iniciada');
+      }
+    },
+  });
+}
+
+export function finalizarForm(labor) {
+  return openForm({
+    title: 'Finalizar labor', subtitle: `${R.laborTitle(labor)}`,
+    submitLabel: 'Finalizar labor', tone: 'primary',
+    fields: [{ name: 'ha', label: 'Hectáreas realizadas', type: 'number', unit: 'ha', required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null), hint: 'Se guarda la fecha y hora de fin de ahora.' }],
+    values: { ha: labor['Ha realizadas'] || null },
+    onSubmit: async (v) => { await store.enqueue(R.labOpsFinalizar(labor, v.ha)); toast('Labor finalizada'); },
+  });
+}
+
+// ===================================================================== CARGAS DE CAMIONES
+export function cargaForm(book) {
+  const cos = laborOptions(book, { onlyCosecha: true });
+  const defLab = cos[0] ? cos[0].value : '';
+  const lab0 = defLab ? book.labores.find((l) => l['ID labor'] === defLab) : null;
+  const plates = unique(book.cargas.slice().reverse().map((c) => c['Camión / patente']).filter(Boolean)).slice(0, 6);
+  const destinos = unique(['AFA', 'ACA', 'Otro acopio', ...book.cargas.map((c) => c['Destino']).filter(Boolean)]);
+  return openForm({
+    title: 'Nueva carga de camión', subtitle: 'Abrí la carga, sumale las descargas y cerrala cuando el camión sale.',
+    submitLabel: 'Abrir carga',
+    fields: [
+      { name: 'Camión / patente', label: 'Camión / patente', type: 'text', upper: true, required: true, suggest: () => plates, placeholder: 'Ej. AB123CD' },
+      { name: 'Cultivo', label: 'Cultivo', type: 'chips', options: ['Trigo', 'Soja', 'Maíz', 'Centeno'], required: true },
+      { name: 'Destino', label: 'Destino', type: 'select', options: destinos, required: true },
+      { name: 'Fecha', label: 'Fecha', type: 'date', required: true },
+      { name: 'Campaña', label: 'Campaña', type: 'select', options: () => campOpts(book), required: true },
+      { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 2 },
+      { type: 'section', label: 'Origen del cereal' },
+      { name: 'ID labor vinculada', label: 'Labor de cosecha', type: 'ref', options: () => cos, empty: 'No hay labores de cosecha cargadas', onChange: (v, set, nv) => { const l = book.labores.find((x) => x['ID labor'] === nv); if (l) { if (l['Cultivo']) set('Cultivo', l['Cultivo']); if (l['Campaña']) set('Campaña', l['Campaña']); } } },
+      { name: 'ID producción vinculada', label: 'Producción', type: 'ref', options: () => prodOptions(book), hint: 'Opcional: si no la elegís, se vincula por campaña, cultivo, campo y lote.' },
+      { name: 'Computa producción', label: '¿Suma a la producción?', type: 'chips', options: SI_NO },
+      { name: 'Documento / origen', label: 'Documento / origen', type: 'select', options: ['Cosecha directa del lote', 'Carta de porte', 'Remito', 'Ticket de balanza', 'Traslado entre silos', 'Otro'] },
+    ],
+    values: { 'Fecha': todayStr(), 'Campaña': lab0 && lab0['Campaña'] ? lab0['Campaña'] : R.suggestCampaign({ tarea: 'Cosecha', cultivo: lab0 ? lab0['Cultivo'] : '' }), 'Cultivo': lab0 && lab0['Cultivo'] ? lab0['Cultivo'] : 'Trigo', 'ID labor vinculada': defLab, 'Computa producción': 'Sí', 'Destino': destinos[0] },
+    onSubmit: async (v) => {
+      const rec = compact(R.cargaNewRec(book, v));
+      await store.enqueue([{ t: 'append', tk: 'cargas', rec: { ...emptyRow('cargas'), ...rec } }]);
+      toast('Carga abierta');
+    },
+  });
+}
+
+export function descargaForm(carga) {
+  const book = store.book;
+  const monos = L(book, 'Monotolva utilizada');
+  const cv = R.cargaView(carga, book);
+  return openForm({
+    title: 'Agregar descarga', subtitle: `${carga['Camión / patente']} · ${carga['Cultivo']} → ${carga['Destino']} · hoy lleva ${fmtKg(cv.kgRec)}`,
+    submitLabel: 'Guardar descarga',
+    fields: [
+      { name: 'Kg asignados', label: 'Kilos descargados', type: 'number', unit: 'kg', required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null), hint: (v) => (v['Kg asignados'] ? `Total de la carga: ${fmtKg(cv.kgRec + Number(v['Kg asignados']))}` : '') },
+      { name: 'Monotolva utilizada', label: 'Monotolva utilizada', type: 'chips', options: monos },
+      { name: 'ID silo', label: 'Silo (si también va a un silo)', type: 'select', options: () => siloOptions(book), hint: 'Opcional' },
+      { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 2 },
+    ],
+    values: {},
+    onSubmit: async (v) => {
+      const fresh = store.book.cargas.find((c) => c['ID carga'] === carga['ID carga']);
+      if (!fresh || fresh['Estado carga'] !== 'En carga') { toast('La carga ya no está abierta', 'warn'); return false; }
+      await store.enqueue([{ t: 'append', tk: 'movs', rec: compact(descRec(fresh, v)) }]);
+      toast('Descarga guardada');
+    },
+  });
+}
+const descRec = (c, v) => ({ ...emptyRow('movs'), ...R.descargaNewRec(c, v) });
+
+export function ticketForm(carga) {
+  const book = store.book;
+  const cv = R.cargaView(carga, book);
+  return openForm({
+    title: 'Cargar ticket', subtitle: `${carga['Camión / patente']} · ${carga['Cultivo']} → ${carga['Destino']} · cargados ${fmtKg(cv.kgRec)}`,
+    submitLabel: 'Guardar ticket',
+    fields: [
+      { name: 'peso', label: 'Peso del ticket', type: 'number', unit: 'kg', required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null) },
+      { name: 'numero', label: 'Número de ticket', type: 'text' },
+      { type: 'note', tone: 'info', ic: 'scale', text: (v) => isBlank(v.peso) ? `Se concilia solo si la diferencia es de hasta ${R.TOL_KG} kg.` : (Math.abs(v.peso - cv.kgRec) <= R.TOL_KG ? `Diferencia ${fmtKg(v.peso - cv.kgRec)}: dentro de la tolerancia, queda Conciliado.` : `Diferencia ${fmtKg(v.peso - cv.kgRec)}: supera ${R.TOL_KG} kg, queda para revisar.`) , show: () => true },
+      { name: 'obs', label: 'Observaciones', type: 'textarea', rows: 2 },
+    ],
+    values: { peso: carga['Peso ticket kg'], numero: carga['Número ticket'] || '', obs: carga['Observaciones'] || '' },
+    onSubmit: async (v) => {
+      const fresh = store.book.cargas.find((c) => c['ID carga'] === carga['ID carga']);
+      await store.enqueue(R.cargaOpsTicket(fresh, store.book, { peso: v.peso, numero: v.numero, obs: v.obs !== (carga['Observaciones'] || '') ? v.obs : '' }));
+      toast('Ticket guardado');
+    },
+  });
+}
+
+// ===================================================================== SILOS
+export function siloForm(book, silo = null) {
+  return openForm({
+    title: silo ? 'Editar silo' : 'Nuevo silo', submitLabel: silo ? 'Guardar cambios' : 'Crear silo',
+    fields: [
+      { name: 'Nombre silo', label: 'Nombre', type: 'text', required: true },
+      { name: 'Tipo', label: 'Tipo', type: 'chips', options: ['Silo de chapa', 'Silobolsa'], required: true },
+      { name: 'Capacidad kg', label: 'Capacidad', type: 'number', unit: 'kg', hint: 'Sirve para calcular el % de llenado.' },
+      { name: 'Estado', label: 'Estado', type: 'chips', options: ['Activo', 'Inactivo'], required: true },
+      { name: 'Estado dato', label: 'Estado del dato', type: 'chips', options: () => estadoDato(book) },
+      { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 2 },
+    ],
+    values: silo ? { ...silo } : { 'Tipo': 'Silo de chapa', 'Estado': 'Activo', 'Estado dato': 'Confirmado' },
+    onSubmit: async (v) => {
+      const data = { 'Nombre silo': v['Nombre silo'], 'Tipo': v['Tipo'], 'Capacidad kg': isBlank(v['Capacidad kg']) ? null : v['Capacidad kg'], 'Estado': v['Estado'], 'Estado dato': v['Estado dato'] || '', 'Observaciones': v['Observaciones'] || '' };
+      if (silo) {
+        const set = diff(silo, data);
+        if (!Object.keys(set).length) return;
+        await store.enqueue([{ t: 'update', tk: 'silos', key: silo['ID silo'], set }]);
+      } else {
+        await store.enqueue([{ t: 'append', tk: 'silos', rec: { ...emptyRow('silos'), 'ID silo': uid8(), ...compact(data) } }]);
+      }
+      toast('Silo guardado');
+    },
+  });
+}
+
+export function entradaSiloForm(silo) {
+  const book = store.book;
+  const hasProd = (v) => !!v['ID producción vinculada'];
+  return openForm({
+    title: 'Entrada a silo', subtitle: `${silo['Nombre silo']} · ${silo['Tipo']}`, submitLabel: 'Guardar entrada',
+    fields: [
+      { name: 'Fecha', label: 'Fecha', type: 'date', required: true },
+      { name: 'Kg asignados', label: 'Kilos que entran', type: 'number', unit: 'kg', required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null) },
+      { name: 'ID producción vinculada', label: 'Producción (lote cosechado)', type: 'ref', options: () => prodOptions(book), hint: 'Si la elegís, los kilos se suman a esa producción.' },
+      { name: 'Campaña', label: 'Campaña', type: 'select', options: () => campOpts(book), show: (v) => !hasProd(v) },
+      { name: 'Campo / cliente', label: 'Campo / cliente', type: 'select', options: () => sortEs(unique(book.lotes.map((l) => l['Campo']))), show: (v) => !hasProd(v) },
+      { name: 'Lote', label: 'Lote', type: 'select', options: (v) => sortEs(unique(book.lotes.filter((l) => !v['Campo / cliente'] || l['Campo'] === v['Campo / cliente']).map((l) => l['Lote físico']))), show: (v) => !hasProd(v) },
+      { name: 'Cultivo', label: 'Cultivo', type: 'chips', options: () => L(book, 'Cultivos'), show: (v) => !hasProd(v) },
+      { name: 'Documento / origen', label: 'Documento / origen', type: 'select', options: ['Cosecha directa del lote', 'Carta de porte', 'Remito', 'Ticket de balanza', 'Traslado entre silos', 'Otro'] },
+      { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 2 },
+    ],
+    values: { 'Fecha': todayStr(), 'Campaña': R.suggestCampaign({ tarea: 'Cosecha', cultivo: '' }) },
+    onSubmit: async (v) => {
+      await store.enqueue([{ t: 'append', tk: 'movs', rec: compact({ ...emptyRow('movs'), ...R.entradaSiloRec(silo, store.book, v) }) }]);
+      toast('Entrada guardada');
+    },
+  });
+}
+
+export function salidaSiloForm(silo) {
+  const book = store.book;
+  const sv = R.siloView(silo, book);
+  return openForm({
+    title: 'Salida de silo', subtitle: `${silo['Nombre silo']} · stock actual ${fmtKg(sv.stock)}`, submitLabel: 'Guardar salida',
+    fields: [
+      { name: 'Fecha', label: 'Fecha', type: 'date', required: true },
+      { name: 'Kg asignados', label: 'Kilos que salen', type: 'number', unit: 'kg', required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null), hint: (v) => (v['Kg asignados'] ? `Quedan ${fmtKg(sv.stock - Number(v['Kg asignados']))}` : '') },
+      { name: 'Destino / ubicación', label: 'Destino', type: 'text', suggest: () => unique(book.movs.filter((m) => m['Tipo de movimiento'] === 'Despacho de stock').map((m) => m['Destino / ubicación'])).slice(0, 5) },
+      { name: 'Documento / origen', label: 'Documento / origen', type: 'select', options: ['Carta de porte', 'Remito', 'Ticket de balanza', 'Traslado entre silos', 'Otro'] },
+      { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 2 },
+    ],
+    values: { 'Fecha': todayStr() },
+    onSubmit: async (v) => {
+      if (Number(v['Kg asignados']) > sv.stock && !(await confirmDialog({ title: 'Sale más de lo que hay', message: `El stock calculado es ${fmtKg(sv.stock)} y estás sacando ${fmtKg(v['Kg asignados'])}. ¿Guardar igual?`, confirmLabel: 'Guardar igual' }))) return false;
+      await store.enqueue([{ t: 'append', tk: 'movs', rec: compact({ ...emptyRow('movs'), ...R.salidaSiloRec(silo, v) }) }]);
+      toast('Salida guardada');
+    },
+  });
+}
+
+// ===================================================================== PRODUCCIÓN
+export function prodForm(book, prod = null) {
+  const edit = !!prod;
+  return openForm({
+    title: edit ? 'Editar producción' : 'Nueva producción', submitLabel: edit ? 'Guardar cambios' : 'Crear producción',
+    subtitle: 'Un registro por lote cosechado. Los kilos se calculan solos con las descargas.',
+    fields: [
+      { name: 'ID lote', label: 'Lote', type: 'ref', options: lotOptions(book), placeholder: 'Elegir campo y lote…', hint: 'Completa unidad, campo y lote.', onChange: (v, set, nv) => { const l = book.lotes.find((x) => x['ID lote'] === nv); if (l) { set('Unidad', l['Unidad']); set('Campo / cliente', l['Campo']); set('Lote / condición', l['Lote físico']); if (isBlank(v['Ha cosechadas']) && l['Ha físicas']) set('Ha cosechadas', l['Ha físicas']); } } },
+      { name: 'Campo / cliente', label: 'Campo / cliente', type: 'text', required: true },
+      { name: 'Lote / condición', label: 'Lote / condición', type: 'text', required: true },
+      { name: 'Unidad', label: 'Unidad', type: 'select', options: () => L(book, 'Unidades'), required: true },
+      { name: 'Cultivo', label: 'Cultivo', type: 'chips', options: ['Trigo', 'Maíz', 'Soja', 'Centeno'], required: true },
+      { name: 'Campaña', label: 'Campaña', type: 'select', options: () => campOpts(book), required: true },
+      { name: 'Tipo / época', label: 'Tipo / época', type: 'select', options: () => L(book, 'Tipo / época') },
+      { name: 'Ha cosechadas', label: 'Hectáreas cosechadas', type: 'number', unit: 'ha', required: true },
+      { name: 'Fecha inicio cosecha', label: 'Inicio de cosecha', type: 'date', required: true },
+      { name: 'Fecha fin cosecha', label: 'Fin de cosecha', type: 'date', required: true },
+      { name: 'ID labor vinculada', label: 'Labor de cosecha', type: 'ref', options: () => laborOptions(book, { onlyCosecha: true }) },
+      { type: 'section', label: 'Dato manual (opcional)' },
+      { name: 'Producción kg', label: 'Producción total', type: 'number', unit: 'kg', hint: 'Dejalo vacío para usar la suma de las descargas.' },
+      { name: 'Estado dato', label: 'Estado del dato', type: 'chips', options: () => estadoDato(book) },
+      { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 2 },
+    ],
+    values: prod ? { ...prod } : { 'Campaña': R.suggestCampaign({ tarea: 'Cosecha', cultivo: 'Soja' }), 'Fecha inicio cosecha': todayStr(), 'Fecha fin cosecha': todayStr(), 'Tipo / época': 'Sin distinguir', 'Estado dato': 'Confirmado' },
+    onSubmit: async (v) => {
+      const data = { 'Campaña': v['Campaña'], 'Fecha inicio cosecha': v['Fecha inicio cosecha'], 'Fecha fin cosecha': v['Fecha fin cosecha'], 'Unidad': v['Unidad'], 'Campo / cliente': v['Campo / cliente'], 'Lote / condición': v['Lote / condición'], 'Cultivo': v['Cultivo'], 'Tipo / época': v['Tipo / época'] || '', 'Ha cosechadas': isBlank(v['Ha cosechadas']) ? null : v['Ha cosechadas'], 'Producción kg': isBlank(v['Producción kg']) ? null : v['Producción kg'], 'ID labor vinculada': v['ID labor vinculada'] || '', 'Estado dato': v['Estado dato'] || '', 'Observaciones': v['Observaciones'] || '' };
+      if (edit) {
+        const set = diff(prod, data);
+        if (!Object.keys(set).length) return;
+        await store.enqueue([{ t: 'update', tk: 'prod', key: prod['ID producción'], set }]);
+      } else {
+        await store.enqueue([{ t: 'append', tk: 'prod', rec: { ...emptyRow('prod'), 'ID producción': uid8(), ...compact(data) } }]);
+      }
+      toast('Producción guardada');
+    },
+  });
+}
+
+// ===================================================================== COMBUSTIBLE
+export function combustibleForm(book, mov = null, preset = {}) {
+  const edit = !!mov;
+  const carga = (v) => v['Tipo movimiento'] === 'Carga a maquinaria';
+  const needOrigen = (v) => ['Carga a maquinaria', 'Transferencia interna', 'Salida a tercero', 'Ajuste negativo'].includes(v['Tipo movimiento']);
+  const needDestino = (v) => ['Carga a maquinaria', 'Transferencia interna', 'Compra / ingreso', 'Devolución', 'Stock inicial', 'Ajuste positivo'].includes(v['Tipo movimiento']);
+  const tanques = ['Tanque fijo', 'Tanque móvil'];
+  const assets = sortEs(unique(book.activos.filter((a) => ['Tractor', 'Cosechadora', 'Vehículo', 'Tanque de combustible'].includes(a['Categoría'])).map((a) => a['Nombre corto']).filter(Boolean)));
+  const fromLab = (v, set, nv) => { const l = book.labores.find((x) => x['ID labor'] === nv); if (l) { set('Unidad económica', l['Unidad']); set('Campo / cliente', l['Campo / cliente']); set('Lote', l['Lote']); } };
+  const v0 = mov ? { ...mov } : { 'Campaña': R.suggestCampaign({}), 'Fecha': todayStr(), 'Hora': nowTime(), 'Producto': 'Gasoil', 'Estado dato': 'Confirmado', 'Documento / origen': 'Registro operativo', ...preset };
+  return openForm({
+    title: edit ? 'Editar movimiento' : 'Movimiento de combustible', submitLabel: edit ? 'Guardar cambios' : 'Guardar movimiento',
+    fields: [
+      { name: 'Tipo movimiento', label: 'Tipo de movimiento', type: 'select', options: () => L(book, 'Tipo movimiento combustible'), required: true, onChange: (v, set) => { if (v['Tipo movimiento'] === 'Carga a maquinaria') { if (v['Activo abastecido']) set('Destino', v['Activo abastecido']); } else if (assets.includes(v['Destino'])) set('Destino', ''); } },
+      { name: 'Litros', label: 'Litros', type: 'number', unit: 'L', required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null) },
+      { name: 'Producto', label: 'Producto', type: 'chips', options: () => L(book, 'Producto combustible'), required: true },
+      { name: 'Origen', label: 'Sale del tanque', type: 'chips', options: tanques, show: (v) => !!v['Origen'] || needOrigen(v), required: needOrigen },
+      { name: 'Activo abastecido', label: 'Equipo que se carga', type: 'select', options: assets, show: (v) => !!v['Activo abastecido'] || carga(v), required: carga, onChange: (v, set, nv) => { if (carga(v)) set('Destino', nv); } },
+      { name: 'Destino', label: 'Entra al tanque', type: 'chips', options: (v) => (v['Tipo movimiento'] === 'Transferencia interna' ? tanques.filter((t) => t !== v['Origen']) : tanques), show: (v) => !carga(v) && (!!v['Destino'] || needDestino(v)), required: (v) => needDestino(v) && !carga(v) },
+      { name: 'ID labor vinculada', label: 'Labor vinculada', type: 'ref', options: () => laborOptions(book), show: (v) => !!v['ID labor vinculada'] || carga(v), required: (v) => carga(v) && v['Computa consumo labor'] === 'Sí', onChange: fromLab, placeholder: 'Opcional' },
+      { name: 'Computa consumo labor', label: '¿Es el consumo de esa labor?', type: 'chips', options: ['Sí', 'No', 'Pendiente'], show: (v) => !!v['Computa consumo labor'] || carga(v), required: carga, hint: 'Elegí "No" si fue una carga de tanque y no el consumo exacto de la labor.' },
+      { type: 'note', tone: 'info', ic: 'fuel', text: (v) => impactoTexto(v), show: (v) => !isBlank(v['Litros']) && !!v['Tipo movimiento'] },
+      { type: 'section', label: 'Datos adicionales' },
+      { name: 'Fecha', label: 'Fecha', type: 'date', required: true },
+      { name: 'Hora', label: 'Hora', type: 'time' },
+      { name: 'Campaña', label: 'Campaña', type: 'select', options: () => campOpts(book), required: true },
+      { name: 'Responsable', label: 'Responsable', type: 'select', options: () => L(book, 'Operadores') },
+      { name: 'Horómetro / kilometraje', label: 'Horómetro / kilometraje', type: 'text', inputmode: 'decimal' },
+      { name: 'Unidad económica', label: 'Unidad económica', type: 'select', options: ['SH general', ...L(book, 'Unidades'), 'Compartido', 'Pendiente'] },
+      { name: 'Campo / cliente', label: 'Campo / cliente', type: 'select', options: () => sortEs(unique(book.lotes.map((l) => l['Campo']))) },
+      { name: 'Lote', label: 'Lote', type: 'select', options: (v) => sortEs(unique(book.lotes.filter((l) => !v['Campo / cliente'] || l['Campo'] === v['Campo / cliente']).map((l) => l['Lote físico']))) },
+      { name: 'Documento / origen', label: 'Documento / origen', type: 'select', options: () => L(book, 'Tipo documento gasto') },
+      { name: 'Estado dato', label: 'Estado del dato', type: 'chips', options: () => estadoDato(book) },
+      { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 2 },
+    ],
+    values: v0,
+    onSubmit: async (v) => {
+      const rec = R.combRecipe(book, v);
+      if (edit) {
+        const { 'ID movimiento combustible': _id, ...rest } = rec;
+        const set = diff(mov, rest);
+        if (!Object.keys(set).length) return;
+        await store.enqueue([{ t: 'update', tk: 'comb', key: mov['ID movimiento combustible'], set }]);
+      } else {
+        await store.enqueue([{ t: 'append', tk: 'comb', rec: { ...emptyRow('comb'), ...compact(rec) } }]);
+      }
+      toast('Movimiento guardado');
+    },
+  });
+}
+function impactoTexto(v) {
+  const m = { 'Tipo movimiento': v['Tipo movimiento'], Litros: Number(v['Litros']), Origen: v['Origen'], Destino: v['Tipo movimiento'] === 'Carga a maquinaria' ? v['Origen'] && '' : v['Destino'] };
+  const probe = { ...m, Destino: v['Destino'] };
+  const f = R.impactoTanque(probe, 'Tanque fijo');
+  const mo = R.impactoTanque(probe, 'Tanque móvil');
+  const g = R.impactoGeneral(m);
+  const s = (n) => `${n > 0 ? '+' : ''}${Math.round(n)} L`;
+  return `Efecto: tanque fijo ${s(f)} · tanque móvil ${s(mo)} · stock general ${s(g)}`;
+}
+
+// ===================================================================== CAMPOS Y EQUIPOS
+export function loteForm(book, lote = null) {
+  const arr = (v) => ['CA-SH', 'CA-DA'].includes(v['Unidad']);
+  return openForm({
+    title: lote ? 'Editar lote' : 'Nuevo campo / lote', submitLabel: lote ? 'Guardar cambios' : 'Crear lote',
+    fields: [
+      { name: 'Unidad', label: 'Unidad', type: 'select', options: () => L(book, 'Unidades'), required: true },
+      { name: 'Campo', label: 'Campo', type: 'text', required: true, suggest: () => sortEs(unique(book.lotes.map((l) => l['Campo']))).slice(0, 8) },
+      { name: 'Lote físico', label: 'Lote', type: 'text', required: true },
+      { name: 'Ha físicas', label: 'Hectáreas', type: 'number', unit: 'ha', required: true },
+      { name: 'Responsable', label: 'Responsable', type: 'chips', options: ['SH', 'David'] },
+      { name: 'Tenencia', label: 'Tenencia', type: 'chips', options: ['Propio', 'Arrendado'] },
+      { name: 'Tipo de alquiler', label: 'Tipo de alquiler', type: 'chips', options: ['No aplica', 'qq/ha', '% producción'], show: arr },
+      { name: 'Valor alquiler', label: 'Valor del alquiler', type: 'number', show: arr },
+      { name: 'Referencia', label: 'Referencia', type: 'chips', options: ['Soja', 'No aplica'], show: arr },
+      { name: 'Estado dato', label: 'Estado del dato', type: 'chips', options: () => estadoDato(book) },
+      { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 2 },
+    ],
+    values: lote ? { ...lote } : { 'Unidad': 'SER', 'Estado dato': 'Confirmado' },
+    onSubmit: async (v) => {
+      const keys = ['Unidad', 'Responsable', 'Campo', 'Lote físico', 'Ha físicas', 'Tenencia', 'Tipo de alquiler', 'Valor alquiler', 'Referencia', 'Estado dato', 'Observaciones'];
+      const data = Object.fromEntries(keys.map((k) => [k, isBlank(v[k]) ? (k === 'Ha físicas' || k === 'Valor alquiler' ? null : '') : v[k]]));
+      if (lote) {
+        const set = diff(lote, data);
+        if (!Object.keys(set).length) return;
+        await store.enqueue([{ t: 'update', tk: 'lotes', key: lote['ID lote'], set }]);
+      } else {
+        await store.enqueue([{ t: 'append', tk: 'lotes', rec: { ...emptyRow('lotes'), 'ID lote': uid8(), ...compact(data) } }]);
+      }
+      toast('Lote guardado');
+    },
+  });
+}
+
+export function activoForm(book, a) {
+  return openForm({
+    title: `Editar ${a['Nombre corto']}`, submitLabel: 'Guardar cambios',
+    fields: [
+      { name: 'Horómetro', label: 'Horómetro', type: 'number', unit: 'hs', hint: 'Horas de motor actuales.' },
+      { name: 'Responsable habitual', label: 'Responsable habitual', type: 'text' },
+      { name: 'Estado dato', label: 'Estado del dato', type: 'chips', options: () => estadoDato(book) },
+      { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 3 },
+    ],
+    values: { ...a },
+    onSubmit: async (v) => {
+      const set = diff(a, { 'Horómetro': isBlank(v['Horómetro']) ? null : v['Horómetro'], 'Responsable habitual': v['Responsable habitual'] || '', 'Estado dato': v['Estado dato'] || '', 'Observaciones': v['Observaciones'] || '' });
+      if (!Object.keys(set).length) return;
+      await store.enqueue([{ t: 'update', tk: 'activos', key: a['ID activo'], set }]);
+      toast('Equipo actualizado');
+    },
+  });
+}
+
+function diff(old, data) {
+  const set = {};
+  for (const [k, val] of Object.entries(data)) {
+    const o = old[k];
+    if ((isBlank(o) && isBlank(val)) || o === val) continue;
+    set[k] = val;
+  }
+  return set;
+}
