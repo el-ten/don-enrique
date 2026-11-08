@@ -97,6 +97,15 @@ small { font-size: .8125rem; }
 @keyframes spin { to { transform: rotate(360deg); } }
 :focus-visible { outline: 3px solid color-mix(in srgb, var(--gold) 70%, transparent); outline-offset: 2px; border-radius: 10px; }
 
+/* ----- franja invisible en el borde de arriba -----
+   iOS 26 difumina el borde superior de las apps instaladas, salvo que ahí haya un elemento FIJO, ancho y con color de fondo:
+   entonces usa ese color y no difumina. La franja no pinta nada (background-clip: text), solo le dice a iOS qué color usar. */
+#edge-band {
+  position: fixed; top: 0; left: 0; right: 0; height: 14px; z-index: 2147483647; pointer-events: none;
+  background-color: var(--green-d); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+body.sheet-full-open #edge-band { background-color: var(--surface); }
+
 /* ----- barra superior ----- */
 .appbar {
   position: sticky; top: 0; z-index: 30; display: flex; align-items: center; justify-content: space-between; gap: 10px;

@@ -48,6 +48,9 @@ export function toast(msg, tone = 'ok', ms = 2600) {
 
 // ---------------------------------------------------------------- hojas
 const stack = [];
+// Con una pantalla completa abierta, el color de la franja de borde (ver #edge-band en app.css) pasa al de su barra de título.
+function syncFull() { document.body.classList.toggle('sheet-full-open', !!document.querySelector('.overlay-full:not([data-closed])')); }
+
 export function openSheet({ title, body, footer, full = false, onClose, id }) {
   const overlay = h('div', { class: `overlay${full ? ' overlay-full' : ''}` });
   const panel = h('div', { class: `sheet${full ? ' sheet-full' : ''}`, role: 'dialog', 'aria-modal': 'true', 'aria-label': title || '' });
@@ -59,6 +62,7 @@ export function openSheet({ title, body, footer, full = false, onClose, id }) {
     const i = stack.indexOf(api);
     if (i >= 0) stack.splice(i, 1);
     document.body.classList.toggle('noscroll', stack.length > 0);
+    syncFull();
     if (onClose) onClose(result);
   };
   const head = h('div', { class: 'sheet-head' },
@@ -73,8 +77,9 @@ export function openSheet({ title, body, footer, full = false, onClose, id }) {
   document.body.append(overlay);
   document.body.classList.add('noscroll');
   requestAnimationFrame(() => overlay.classList.add('in'));
-  const api = { close, el: panel, body: bodyEl, setBody(n) { bodyEl.replaceChildren(n); } };
+  const api = { close, el: panel, body: bodyEl, full, setBody(n) { bodyEl.replaceChildren(n); } };
   stack.push(api);
+  syncFull();
   return api;
 }
 export function topSheet() { return stack[stack.length - 1]; }
