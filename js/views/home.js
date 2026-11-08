@@ -63,9 +63,9 @@ export function render({ go, book }) {
   for (const l of abiertas) marcha.push(h('div', { class: 'live-card' },
     h('div', { class: 'row-top', onclick: () => go(`labores/${encodeURIComponent(l['ID labor'])}`), role: 'button', tabindex: '0' },
       cropBadge(l['Cultivo'], l['Tarea'] === 'Cosecha' ? 'wheat' : 'tractor'),
-      h('div', { class: 'grow' }, h('div', { class: 'title-line' }, h('b', { class: 'ct' }, `${l['Tarea']}${l['Cultivo'] ? ' · ' + l['Cultivo'] : ''}`), estadoChip(l['Estado labor'])), h('div', { class: 'sub' }, R.laborPlace(l))),
+      h('div', { class: 'grow' }, h('div', { class: 'title-line' }, h('b', { class: 'ct' }, `${l['Tarea']}${l['Cultivo'] ? ' · ' + l['Cultivo'] : ''}`), estadoChip(R.estadoVista(l))), h('div', { class: 'sub' }, R.laborPlace(l))),
       icon('right', 20)),
-    h('div', { class: 'live-time' }, icon('clock', 18), h('b', null, fmtDur(R.laborHoras(l))), h('span', null, l['Estado labor'] === 'Pausada' ? 'trabajadas (en pausa)' : 'trabajadas'), l['Hora inicio'] ? h('em', null, `desde ${relDay(l['Fecha inicio'])} ${l['Hora inicio']}`) : null),
+    h('div', { class: 'live-time' }, icon('clock', 18), h('b', null, fmtDur(R.laborHoras(l))), h('span', null, R.isPaused(l) ? 'trabajadas (en pausa)' : 'trabajadas'), l['Hora inicio'] ? h('em', null, `desde ${relDay(l['Fecha inicio'])} ${l['Hora inicio']}`) : null),
     laborButtons(l)));
   for (const c of cargas) marcha.push(h('div', { class: 'live-card' }, cargaCard(c, book, () => go(`cosecha/${encodeURIComponent(c['ID carga'])}`)), cargaButtons(c)));
 

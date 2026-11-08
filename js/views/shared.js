@@ -34,7 +34,7 @@ export function laborCard(l, onClick) {
     h('div', { class: 'row-top' },
       cropBadge(l['Cultivo'], l['Tarea'] === 'Cosecha' ? 'wheat' : 'tractor'),
       h('div', { class: 'grow' },
-        h('div', { class: 'title-line' }, h('b', { class: 'ct' }, `${l['Tarea']}${l['Cultivo'] ? ' · ' + l['Cultivo'] : ''}`), estadoChip(l['Estado labor'])),
+        h('div', { class: 'title-line' }, h('b', { class: 'ct' }, `${l['Tarea']}${l['Cultivo'] ? ' · ' + l['Cultivo'] : ''}`), estadoChip(R.estadoVista(l))),
         h('div', { class: 'sub' }, R.laborPlace(l)))),
     h('div', { class: 'meta' },
       h('span', null, icon('calendar', 15), relDay(l['Fecha inicio'])),

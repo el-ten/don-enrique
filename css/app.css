@@ -435,6 +435,8 @@ input[type="date"].input, input[type="time"].input { display: block; text-align:
 .pick-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; width: 100%; min-height: 56px; padding: 10px 14px; border-radius: 16px; background: var(--surface); border: 1.5px solid var(--line); }
 .pick-item.sel { border-color: var(--green); background: var(--green-l); }
 .pick-item.clear { color: var(--red); }
+.pick-item.add { color: var(--green); border-style: dashed; margin-bottom: 8px; }
+.pick-item.add b { font-weight: 700; }
 .pick-main { display: flex; flex-direction: column; min-width: 0; }
 .pick-main small { color: var(--muted); }
 

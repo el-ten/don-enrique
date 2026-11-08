@@ -2,7 +2,9 @@
 import { isBlank, norm, dtToMs, dateTimeToMs, todayStr, nowTime, nowDT, uid8, unique, splitList, campaignFor } from './util.js';
 
 export const TOL_KG = 100;
-export const ESTADOS_ABIERTOS = ['En curso', 'Pausada'];
+// OJO: la planilla solo acepta los estados de 01_CONFIGURACION (columna "Estado labor"), que no incluye "Pausada".
+// Una labor pausada sigue "En curso" y se reconoce por tener "Inicio pausa actual" cargado (así lo hace AppSheet).
+export const ESTADOS_ABIERTOS = ['En curso'];
 export const TIPOS_ENTRADA = ['Cosecha a camión', 'Cosecha a silo', 'Cosecha a silobolsa'];
 export const TIPOS_ENTRADA_DIRECTA = ['Cosecha a silo', 'Cosecha a silobolsa'];
 export const TAREAS_CAMPO = ['Siembra', 'Cosecha', 'Pulverización', 'Fertilización'];
@@ -12,6 +14,9 @@ const byKey = (rows, key) => Object.fromEntries(rows.map((r) => [r[key], r]));
 
 // ------------------------------------------------------------------ LABORES
 export function isOpen(l) { return ESTADOS_ABIERTOS.includes(l['Estado labor']); }
+export function isPaused(l) { return isOpen(l) && !!l['Inicio pausa actual']; }
+// Lo que se muestra en pantalla (la planilla no tiene un estado "Pausada").
+export function estadoVista(l) { return isPaused(l) ? 'Pausada' : l['Estado labor']; }
 
 export function laborTitle(l) {
   const campo = l['Campo / cliente'] || 'Sin campo';
@@ -33,7 +38,7 @@ export function laborHoras(l, nowMs = Date.now()) {
   if (Number.isNaN(fin)) {
     if (!isOpen(l)) return null;
     fin = nowMs;
-    if (l['Estado labor'] === 'Pausada' && l['Inicio pausa actual']) extra = Math.max(0, (nowMs - dtToMs(l['Inicio pausa actual'])) / 3600000);
+    if (isPaused(l)) extra = Math.max(0, (nowMs - dtToMs(l['Inicio pausa actual'])) / 3600000);
   }
   let h;
   if (extra === 0 && !isOpen(l) && !Number.isNaN(dateTimeToMs(l['Fecha fin'], l['Hora fin']))) {
@@ -53,19 +58,19 @@ export function laborRend(l, nowMs) {
 }
 
 export function labOpsPausar(l) {
-  return [{ t: 'update', tk: 'labores', key: l['ID labor'], set: { 'Estado labor': 'Pausada', 'Inicio pausa actual': nowDT() } }];
+  return [{ t: 'update', tk: 'labores', key: l['ID labor'], set: { 'Inicio pausa actual': nowDT() } }];
 }
 export function labOpsReanudar(l, nowMs = Date.now()) {
   const ini = l['Inicio pausa actual'] ? dtToMs(l['Inicio pausa actual']) : nowMs;
   const dur = Math.max(0, (nowMs - ini) / 3600000);
   const total = (l['Pausas / demoras h'] || 0) + dur;
-  return [{ t: 'update', tk: 'labores', key: l['ID labor'], set: { 'Estado labor': 'En curso', 'Pausas / demoras h': total, 'Inicio pausa actual': '' } }];
+  return [{ t: 'update', tk: 'labores', key: l['ID labor'], set: { 'Pausas / demoras h': total, 'Inicio pausa actual': '' } }];
 }
 export function labOpsFinalizar(l, ha) {
   return [{ t: 'update', tk: 'labores', key: l['ID labor'], set: { 'Estado labor': 'Terminado', 'Fecha fin': todayStr(), 'Hora fin': nowTime(), 'Ha realizadas': Number(ha) } }];
 }
 export function canPause(l) { return l['Estado labor'] === 'En curso' && !l['Inicio pausa actual']; }
-export function canResume(l) { return l['Estado labor'] === 'Pausada' && !!l['Inicio pausa actual']; }
+export function canResume(l) { return isPaused(l); }
 export function canFinish(l) { return l['Estado labor'] === 'En curso' && !l['Inicio pausa actual']; }
 
 export function machineBusy(book, machine, exceptId) {

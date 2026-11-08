@@ -15,6 +15,18 @@ export function lotOptions(book) {
     .sort((a, b) => `${a['Campo']} ${a['Lote físico']}`.localeCompare(`${b['Campo']} ${b['Lote físico']}`, 'es'))
     .map((l) => ({ value: l['ID lote'], label: R.lotLabel(l), sub: `${l['Unidad']}${l['Ha físicas'] ? ' · ' + l['Ha físicas'] + ' ha' : ''}` }));
 }
+// Opción "Agregar lote nuevo" del selector de lotes: abre el formulario de lote y devuelve el ID del lote creado
+// (o undefined si se cerró sin guardar), para que el selector lo deje elegido.
+export function loteAdd(book) {
+  return {
+    label: 'Agregar lote nuevo',
+    run: (texto) => new Promise((resolve) => {
+      let creado;
+      // Unidad sin valor por defecto: define a qué unidad se imputan los costos, así que se elige a propósito.
+      loteForm(store.book || book, null, { prefill: { 'Unidad': '', ...(texto ? { 'Lote físico': texto } : {}) }, onCreated: (id) => { creado = id; }, onClose: () => resolve(creado) });
+    }),
+  };
+}
 export function laborOptions(book, { onlyCosecha = false } = {}) {
   return [...book.labores].filter((l) => !onlyCosecha || l['Tarea'] === 'Cosecha')
     .sort((a, b) => (b['Fecha inicio'] + (b['Hora inicio'] || '')).localeCompare(a['Fecha inicio'] + (a['Hora inicio'] || '')))
@@ -27,11 +39,14 @@ export function prodOptions(book) {
 export function siloOptions(book, { active = true } = {}) {
   return book.silos.filter((s) => !active || s['Estado'] !== 'Inactivo').map((s) => ({ value: s['ID silo'], label: s['Nombre silo'] || s['ID silo'], sub: s['Tipo'] }));
 }
-const campOpts = (book) => unique([...L(book, 'Campañas'), '2027/28']).filter(Boolean);
+const campOpts = (book) => unique(L(book, 'Campañas')).filter(Boolean);
+// 05_LABORES solo acepta las campañas desde la 2.ª fila de la lista de la planilla (ver STRICT en schema.js)
+const campOptsLabor = (book) => campOpts(book).slice(1);
 const estadoDato = (book) => L(book, 'Estado dato');
 
 // ===================================================================== LABORES
 export function laborForm(book, { mode = 'curso', labor = null } = {}) {
+  const live = () => store.book || book;
   const edit = mode === 'editar';
   const manual = mode === 'manual' || edit;
   const v0 = labor ? {
@@ -49,7 +64,7 @@ export function laborForm(book, { mode = 'curso', labor = null } = {}) {
 
   const fields = [
     { name: 'Tarea', label: 'Tarea', type: 'chips', options: L(book, 'Tareas'), required: true, onChange: (v, set) => { sugCamp(v, set); } },
-    { name: 'ID lote vinculado', label: 'Lote', type: 'ref', options: lotOptions(book), required: reqCampo, show: (v) => !!v['ID lote vinculado'] || ['Siembra', 'Cosecha', 'Pulverización', 'Fertilización', 'Traslado', 'Entrega de cereal', 'Otra'].includes(v['Tarea']), placeholder: 'Elegir campo y lote…' },
+    { name: 'ID lote vinculado', label: 'Lote', type: 'ref', options: () => lotOptions(live()), add: loteAdd(book), required: reqCampo, show: (v) => !!v['ID lote vinculado'] || ['Siembra', 'Cosecha', 'Pulverización', 'Fertilización', 'Traslado', 'Entrega de cereal', 'Otra'].includes(v['Tarea']), placeholder: 'Elegir campo y lote…' },
     { name: 'Cultivo', label: 'Cultivo', type: 'chips', options: L(book, 'Cultivos'), required: reqCampo, show: (v) => !!v['Cultivo'] || ['Siembra', 'Cosecha', 'Pulverización', 'Fertilización', 'Entrega de cereal', 'Venta de cereal'].includes(v['Tarea']), onChange: (v, set) => sugCamp(v, set) },
     { name: 'Variedad / híbrido', label: 'Variedad / híbrido', type: 'text', show: isT('Siembra', 'Cosecha'), placeholder: 'Opcional' },
     { name: 'Máquina principal', label: 'Máquina principal', type: 'select', options: () => R.machineOptions(book), required: reqCampo, show: isT(...machineTasks) },
@@ -58,7 +73,7 @@ export function laborForm(book, { mode = 'curso', labor = null } = {}) {
     { name: 'Equipos de apoyo', label: 'Equipos de apoyo', type: 'multi', options: () => R.supportEquipOptions(book), show: isT('Siembra', 'Cosecha', 'Pulverización', 'Fertilización', 'Traslado', 'Carga de combustible', 'Entrega de cereal') },
     { name: 'Operadores de apoyo', label: 'Operadores de apoyo', type: 'multi', options: () => L(book, 'Operadores'), show: (v) => (v['Operadores de apoyo'] || []).length > 0 || machineTasks.includes(v['Tarea']) },
     { type: 'section', label: 'Datos de la campaña' },
-    { name: 'Campaña', label: 'Campaña', type: 'select', options: () => campOpts(book), required: true, onChange: (v, set, nv) => { set('_camp', true); } },
+    { name: 'Campaña', label: 'Campaña', type: 'select', options: () => campOptsLabor(book), required: true, onChange: (v, set, nv) => { set('_camp', true); } },
   ];
   if (manual) {
     fields.push(
@@ -69,7 +84,7 @@ export function laborForm(book, { mode = 'curso', labor = null } = {}) {
       { name: 'Hora fin', label: 'Hora de fin', type: 'time' },
       { name: 'Pausas / demoras h', label: 'Pausas y demoras', type: 'dur', hint: 'Tiempo total parado, en horas y minutos (ej. 1:30)' },
       { name: 'Ha realizadas', label: 'Hectáreas realizadas', type: 'number', unit: 'ha', valid: (v, x) => (x < 0 ? 'No puede ser negativo' : null) },
-      { name: 'Estado labor', label: 'Estado de la labor', type: 'select', options: ['Planificado', 'En curso', 'Pausada', 'Terminado', 'Suspendido', 'Reprogramado', 'Cancelado'], required: true },
+      { name: 'Estado labor', label: 'Estado de la labor', type: 'select', options: () => L(book, 'Estado labor'), required: true },
       { name: 'Estado dato', label: 'Estado del dato', type: 'chips', options: () => estadoDato(book), required: true },
     );
     if (edit) fields.push({ name: 'Coeficiente combustible L/ha', label: 'Coeficiente de combustible', type: 'number', unit: 'L/ha' });
@@ -82,8 +97,8 @@ export function laborForm(book, { mode = 'curso', labor = null } = {}) {
     submitLabel: edit ? 'Guardar cambios' : mode === 'manual' ? 'Guardar labor' : 'Iniciar ahora',
     fields, values: v0,
     onSubmit: async (v) => {
-      const lote = v['ID lote vinculado'] ? book.lotes.find((l) => l['ID lote'] === v['ID lote vinculado']) : null;
-      const open = ['En curso', 'Pausada'].includes(v['Estado labor']);
+      const lote = v['ID lote vinculado'] ? live().lotes.find((l) => l['ID lote'] === v['ID lote vinculado']) : null;
+      const open = R.ESTADOS_ABIERTOS.includes(v['Estado labor']);
       const busy = open ? R.machineBusy(book, v['Máquina principal'], labor && labor['ID labor']) : null;
       if (busy && !(await confirmDialog({ title: 'La máquina ya está en uso', message: `${v['Máquina principal']} tiene abierta la labor "${R.laborTitle(busy)}" del ${fmtDate(busy['Fecha inicio'])}. ¿Querés iniciar esta igual?`, confirmLabel: 'Iniciar igual' }))) return false;
       const base = {
@@ -288,7 +303,7 @@ export function prodForm(book, prod = null) {
     title: edit ? 'Editar producción' : 'Nueva producción', submitLabel: edit ? 'Guardar cambios' : 'Crear producción',
     subtitle: 'Un registro por lote cosechado. Los kilos se calculan solos con las descargas.',
     fields: [
-      { name: 'ID lote', label: 'Lote', type: 'ref', options: lotOptions(book), placeholder: 'Elegir campo y lote…', hint: 'Completa unidad, campo y lote.', onChange: (v, set, nv) => { const l = book.lotes.find((x) => x['ID lote'] === nv); if (l) { set('Unidad', l['Unidad']); set('Campo / cliente', l['Campo']); set('Lote / condición', l['Lote físico']); if (isBlank(v['Ha cosechadas']) && l['Ha físicas']) set('Ha cosechadas', l['Ha físicas']); } } },
+      { name: 'ID lote', label: 'Lote', type: 'ref', options: () => lotOptions(store.book || book), add: loteAdd(book), placeholder: 'Elegir campo y lote…', hint: 'Completa unidad, campo y lote.', onChange: (v, set, nv) => { const l = (store.book || book).lotes.find((x) => x['ID lote'] === nv); if (l) { set('Unidad', l['Unidad']); set('Campo / cliente', l['Campo']); set('Lote / condición', l['Lote físico']); if (isBlank(v['Ha cosechadas']) && l['Ha físicas']) set('Ha cosechadas', l['Ha físicas']); } } },
       { name: 'Campo / cliente', label: 'Campo / cliente', type: 'text', required: true },
       { name: 'Lote / condición', label: 'Lote / condición', type: 'text', required: true },
       { name: 'Unidad', label: 'Unidad', type: 'select', options: () => L(book, 'Unidades'), required: true },
@@ -339,7 +354,7 @@ export function combustibleForm(book, mov = null, preset = {}) {
       { name: 'Activo abastecido', label: 'Equipo que se carga', type: 'select', options: assets, show: (v) => !!v['Activo abastecido'] || carga(v), required: carga, onChange: (v, set, nv) => { if (carga(v)) set('Destino', nv); } },
       { name: 'Destino', label: 'Entra al tanque', type: 'chips', options: (v) => (v['Tipo movimiento'] === 'Transferencia interna' ? tanques.filter((t) => t !== v['Origen']) : tanques), show: (v) => !carga(v) && (!!v['Destino'] || needDestino(v)), required: (v) => needDestino(v) && !carga(v) },
       { name: 'ID labor vinculada', label: 'Labor vinculada', type: 'ref', options: () => laborOptions(book), show: (v) => !!v['ID labor vinculada'] || carga(v), required: (v) => carga(v) && v['Computa consumo labor'] === 'Sí', onChange: fromLab, placeholder: 'Opcional' },
-      { name: 'Computa consumo labor', label: '¿Es el consumo de esa labor?', type: 'chips', options: ['Sí', 'No', 'Pendiente'], show: (v) => !!v['Computa consumo labor'] || carga(v), required: carga, hint: 'Elegí "No" si fue una carga de tanque y no el consumo exacto de la labor.' },
+      { name: 'Computa consumo labor', label: '¿Es el consumo de esa labor?', type: 'chips', options: ['Sí', 'No', 'Pendiente por verificar'], show: (v) => !!v['Computa consumo labor'] || carga(v), required: carga, hint: 'Elegí "No" si fue una carga de tanque y no el consumo exacto de la labor.' },
       { type: 'note', tone: 'info', ic: 'fuel', text: (v) => impactoTexto(v), show: (v) => !isBlank(v['Litros']) && !!v['Tipo movimiento'] },
       { type: 'section', label: 'Datos adicionales' },
       { name: 'Fecha', label: 'Fecha', type: 'date', required: true },
@@ -347,7 +362,7 @@ export function combustibleForm(book, mov = null, preset = {}) {
       { name: 'Campaña', label: 'Campaña', type: 'select', options: () => campOpts(book), required: true },
       { name: 'Responsable', label: 'Responsable', type: 'select', options: () => L(book, 'Operadores') },
       { name: 'Horómetro / kilometraje', label: 'Horómetro / kilometraje', type: 'text', inputmode: 'decimal' },
-      { name: 'Unidad económica', label: 'Unidad económica', type: 'select', options: ['SH general', ...L(book, 'Unidades'), 'Compartido', 'Pendiente'] },
+      { name: 'Unidad económica', label: 'Unidad económica', type: 'select', options: () => L(book, 'Unidad imputada gasto') },
       { name: 'Campo / cliente', label: 'Campo / cliente', type: 'select', options: () => sortEs(unique(book.lotes.map((l) => l['Campo']))) },
       { name: 'Lote', label: 'Lote', type: 'select', options: (v) => sortEs(unique(book.lotes.filter((l) => !v['Campo / cliente'] || l['Campo'] === v['Campo / cliente']).map((l) => l['Lote físico']))) },
       { name: 'Documento / origen', label: 'Documento / origen', type: 'select', options: () => L(book, 'Tipo documento gasto') },
@@ -380,13 +395,13 @@ function impactoTexto(v) {
 }
 
 // ===================================================================== CAMPOS Y EQUIPOS
-export function loteForm(book, lote = null) {
+export function loteForm(book, lote = null, { prefill = {}, onCreated = null, onClose = null } = {}) {
   const arr = (v) => ['CA-SH', 'CA-DA'].includes(v['Unidad']);
   return openForm({
     title: lote ? 'Editar lote' : 'Nuevo campo / lote', submitLabel: lote ? 'Guardar cambios' : 'Crear lote',
     fields: [
       { name: 'Unidad', label: 'Unidad', type: 'select', options: () => L(book, 'Unidades'), required: true },
-      { name: 'Campo', label: 'Campo', type: 'text', required: true, suggest: () => sortEs(unique(book.lotes.map((l) => l['Campo']))).slice(0, 8) },
+      { name: 'Campo', label: 'Campo', type: 'text', required: true, suggest: () => sortEs(unique((store.book || book).lotes.map((l) => l['Campo']))).slice(0, 8) },
       { name: 'Lote físico', label: 'Lote', type: 'text', required: true },
       { name: 'Ha físicas', label: 'Hectáreas', type: 'number', unit: 'ha', required: true },
       { name: 'Responsable', label: 'Responsable', type: 'chips', options: ['SH', 'David'] },
@@ -397,7 +412,8 @@ export function loteForm(book, lote = null) {
       { name: 'Estado dato', label: 'Estado del dato', type: 'chips', options: () => estadoDato(book) },
       { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 2 },
     ],
-    values: lote ? { ...lote } : { 'Unidad': 'SER', 'Estado dato': 'Confirmado' },
+    values: lote ? { ...lote } : { 'Unidad': 'SER', 'Estado dato': 'Confirmado', ...prefill },
+    onClose,
     onSubmit: async (v) => {
       const keys = ['Unidad', 'Responsable', 'Campo', 'Lote físico', 'Ha físicas', 'Tenencia', 'Tipo de alquiler', 'Valor alquiler', 'Referencia', 'Estado dato', 'Observaciones'];
       const data = Object.fromEntries(keys.map((k) => [k, isBlank(v[k]) ? (k === 'Ha físicas' || k === 'Valor alquiler' ? null : '') : v[k]]));
@@ -406,7 +422,9 @@ export function loteForm(book, lote = null) {
         if (!Object.keys(set).length) return;
         await store.enqueue([{ t: 'update', tk: 'lotes', key: lote['ID lote'], set }]);
       } else {
-        await store.enqueue([{ t: 'append', tk: 'lotes', rec: { ...emptyRow('lotes'), 'ID lote': uid8(), ...compact(data) } }]);
+        const id = uid8();
+        await store.enqueue([{ t: 'append', tk: 'lotes', rec: { ...emptyRow('lotes'), 'ID lote': id, ...compact(data) } }]);
+        if (onCreated) onCreated(id);
       }
       toast('Lote guardado');
     },

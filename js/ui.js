@@ -92,7 +92,7 @@ export function confirmDialog({ title, message, confirmLabel = 'Aceptar', cancel
 }
 
 // Selector con búsqueda para listas largas (lotes, labores, producciones…).
-export function pickOne({ title, options, value, allowClear = false, searchable = true, empty = 'No hay opciones' }) {
+export function pickOne({ title, options, value, allowClear = false, searchable = true, empty = 'No hay opciones', add = null }) {
   return new Promise((resolve) => {
     let picked = false;
     const q = h('input', { class: 'input', type: 'search', placeholder: 'Buscar…', 'aria-label': 'Buscar', autocomplete: 'off' });
@@ -109,7 +109,8 @@ export function pickOne({ title, options, value, allowClear = false, searchable 
       }
     };
     q.addEventListener('input', draw);
-    const body = h('div', null, searchable && options.length > 6 ? h('div', { class: 'pick-search' }, q) : null, allowClear && value ? h('button', { class: 'pick-item clear', type: 'button', onclick: () => { picked = true; sh.close(); resolve(''); } }, h('span', { class: 'pick-main' }, h('b', null, 'Quitar selección'))) : null, list);
+    const addBtn = add ? h('button', { class: 'pick-item add', type: 'button', onclick: async () => { const r = await add.run(q.value.trim()); if (r) { picked = true; sh.close(); resolve(r); } } }, h('span', { class: 'pick-main' }, h('b', null, add.label)), icon('plus', 20)) : null;
+    const body = h('div', null, searchable && options.length > 6 ? h('div', { class: 'pick-search' }, q) : null, addBtn, allowClear && value ? h('button', { class: 'pick-item clear', type: 'button', onclick: () => { picked = true; sh.close(); resolve(''); } }, h('span', { class: 'pick-main' }, h('b', null, 'Quitar selección'))) : null, list);
     const sh = openSheet({ title, body, onClose: () => { if (!picked) resolve(undefined); } });
     draw();
   });
@@ -117,7 +118,7 @@ export function pickOne({ title, options, value, allowClear = false, searchable 
 
 // ---------------------------------------------------------------- formularios
 // fields: [{ name, label, type, options, show(v), required(v)|bool, valid(v), default, hint, unit, onChange(v, set) ... }]
-export function openForm({ title, subtitle, fields, values = {}, submitLabel = 'Guardar', onSubmit, tone = 'primary' }) {
+export function openForm({ title, subtitle, fields, values = {}, submitLabel = 'Guardar', onSubmit, tone = 'primary', onClose }) {
   const v = { ...values };
   const errors = {};
   const form = h('form', { class: 'form', novalidate: true, autocomplete: 'off' });
@@ -205,7 +206,7 @@ export function openForm({ title, subtitle, fields, values = {}, submitLabel = '
         const opts = typeof f.options === 'function' ? f.options(v) : f.options || [];
         const cur = opts.find((o) => o.value === val);
         control = h('button', { id: `f_${f.name}`, type: 'button', class: `input ref-btn${cur ? '' : ' empty'}`, onclick: async () => {
-          const r = await pickOne({ title: f.label, options: opts, value: val, allowClear: !req, empty: f.empty });
+          const r = await pickOne({ title: f.label, options: opts, value: val, allowClear: !req, empty: f.empty, add: f.add });
           if (r !== undefined) change(r);
         } }, h('span', { class: 'ref-text' }, cur ? h('b', null, cur.label) : (f.placeholder || 'Elegir…'), cur && cur.sub ? h('small', null, cur.sub) : null), icon('right', 18));
         break;
@@ -307,7 +308,7 @@ export function openForm({ title, subtitle, fields, values = {}, submitLabel = '
   const submitBtn = button({ label: submitLabel, tone, size: 'lg', block: true, onClick: submit });
   // aplicar valores por defecto dependientes
   for (const f of fields) if (f.onChange && f.runOnOpen) f.onChange(v, setValue, v[f.name]);
-  sheet = openSheet({ title, full: true, body: form, footer: submitBtn });
+  sheet = openSheet({ title, full: true, body: form, footer: submitBtn, onClose });
   redraw();
   setTimeout(() => { const sb = sheet.body; if (sb) sb.scrollTop = 0; }, 0);
   return sheet;

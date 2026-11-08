@@ -71,6 +71,8 @@ export const DEFAULT_LISTS = {
   Cultivos: ['Trigo', 'Centeno', 'Soja', 'Maíz', 'Otro'],
   Operadores: ['Operador 1', 'Operador 2', 'Operador 3', 'Otro'], // genérico a propósito: los nombres reales vienen de la planilla (01_CONFIGURACION) al conectar
   'Estado dato': ['Confirmado', 'Reconstruido', 'Estimado', 'Pendiente'],
+  'Estado labor': ['Planificado', 'En curso', 'Terminado', 'Suspendido', 'Reprogramado', 'Cancelado'],
+  'Unidad imputada gasto': ['SH general', 'CP-SH', 'CA-SH', 'CA-DA', 'SER', 'ADM-TERC', 'Compartido', 'Pendiente'],
   'Tipo / época': ['Primera', 'Segunda', 'Consolidado', 'Sin distinguir', 'Otro'],
   'Tipo de movimiento': ['Cosecha a camión', 'Cosecha a silo', 'Cosecha a silobolsa', 'Cosecha a acoplado', 'Cosecha a monotolva', 'Traslado interno', 'Despacho de stock', 'Corrección'],
   'Equipo o recipiente': ['Camión', 'Comofra', 'Ombú', 'Gimetal', 'Apache', 'Acoplados rojos', 'Acoplado con sinfín 8 t', 'Acoplado con sinfín 12 t', 'Silo de chapa', 'Silobolsa', 'Otro'],
@@ -79,3 +81,27 @@ export const DEFAULT_LISTS = {
   'Producto combustible': ['Gasoil', 'Nafta', 'AdBlue', 'Otro'],
   'Tipo documento gasto': ['Factura A', 'Factura B', 'Factura C', 'Nota de crédito', 'Nota de débito', 'Recibo', 'Ticket', 'Remito', 'Compra sin comprobante', 'Presupuesto / compromiso', 'Registro operativo'],
 };
+
+// Reglas de validación ESTRICTAS de la planilla real (revisadas el 08/11/2026). Si se escribe en una celda un valor
+// que no está en su lista, Google rechaza el cambio ("infringen las reglas de validación de datos").
+//   cfg  = lista de 01_CONFIGURACION (se lee de la planilla)      lit = lista fija de la planilla
+//   skip = filas del principio de la lista que la planilla NO acepta (05_LABORES acepta Campañas desde la 2.ª fila)
+// Se usa en el simulador de pruebas para que cualquier opción de la app fuera de lista se detecte antes de llegar al campo.
+const S_DATO = { cfg: 'Estado dato' };
+const S_CAMP = { cfg: 'Campañas' };
+export const STRICT = {
+  lotes: { 'Unidad': { cfg: 'Unidades' }, 'Responsable': { lit: ['SH', 'David'] }, 'Tenencia': { lit: ['Propio', 'Arrendado'] }, 'Tipo de alquiler': { lit: ['No aplica', 'qq/ha', '% producción'] }, 'Referencia': { lit: ['Soja', 'No aplica'] }, 'Estado dato': S_DATO },
+  labores: { 'Campaña': { cfg: 'Campañas', skip: 1 }, 'Unidad': { cfg: 'Unidades' }, 'Tarea': { cfg: 'Tareas' }, 'Cultivo': { cfg: 'Cultivos' }, 'Estado labor': { cfg: 'Estado labor' }, 'Estado dato': S_DATO },
+  prod: { 'Campaña': S_CAMP, 'Unidad': { cfg: 'Unidades' }, 'Cultivo': { cfg: 'Cultivos' }, 'Tipo / época': { cfg: 'Tipo / época' }, 'Estado dato': S_DATO },
+  movs: { 'Campaña': S_CAMP, 'Unidad': { cfg: 'Unidades' }, 'Cultivo': { cfg: 'Cultivos' }, 'Tipo de movimiento': { cfg: 'Tipo de movimiento' }, 'Monotolva utilizada': { cfg: 'Monotolva utilizada' }, 'Equipo / recipiente': { cfg: 'Equipo o recipiente' }, 'Computa producción': { lit: ['Sí', 'No'] } },
+  comb: { 'Campaña': S_CAMP, 'Tipo movimiento': { cfg: 'Tipo movimiento combustible' }, 'Producto': { cfg: 'Producto combustible' }, 'Unidad económica': { cfg: 'Unidad imputada gasto' }, 'Responsable': { cfg: 'Operadores' }, 'Documento / origen': { cfg: 'Tipo documento gasto' }, 'Estado dato': S_DATO, 'Computa consumo labor': { lit: ['Sí', 'No', 'Pendiente por verificar'] } },
+};
+
+// Devuelve el texto del error (el mismo tipo de mensaje que da Google) o null si el valor es aceptable.
+export function strictError(tk, header, value, lists) {
+  const r = (STRICT[tk] || {})[header];
+  if (!r || value === '' || value === null || value === undefined) return null;
+  const allowed = r.lit || ((lists && lists[r.cfg]) || []).slice(r.skip || 0);
+  if (!allowed.length || allowed.includes(String(value))) return null;
+  return `Los datos introducidos (${header}: "${value}") infringen las reglas de validación de datos definidas en esa celda.`;
+}

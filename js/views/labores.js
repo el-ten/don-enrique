@@ -70,8 +70,8 @@ function detail({ id, go, book }) {
   const fuelL = combs.reduce((a, m) => a + (m['Computa consumo labor'] === 'Sí' ? (m['Litros'] || 0) : 0), 0);
   return {
     node: h('div', { class: 'page' },
-      detailHead({ title: l['Tarea'] + (l['Cultivo'] ? ' · ' + l['Cultivo'] : ''), sub: R.laborPlace(l), ic: l['Tarea'] === 'Cosecha' ? 'wheat' : 'tractor', crop: l['Cultivo'], chips: [estadoChip(l['Estado labor']), datoChip(l['Estado dato']), l._pending ? chip('Sin subir', 'warn', 'cloud') : null], onBack: backTo }),
-      R.isOpen(l) ? h('div', { class: 'live-card flat' }, h('div', { class: 'live-time' }, icon('clock', 18), h('b', null, fmtDur(hrs)), h('span', null, l['Estado labor'] === 'Pausada' ? 'trabajadas (en pausa)' : 'trabajadas'), l['Hora inicio'] ? h('em', null, `desde ${fmtDate(l['Fecha inicio'], false)} ${l['Hora inicio']}`) : null), laborButtons(l, { size: 'lg' })) : null,
+      detailHead({ title: l['Tarea'] + (l['Cultivo'] ? ' · ' + l['Cultivo'] : ''), sub: R.laborPlace(l), ic: l['Tarea'] === 'Cosecha' ? 'wheat' : 'tractor', crop: l['Cultivo'], chips: [estadoChip(R.estadoVista(l)), datoChip(l['Estado dato']), l._pending ? chip('Sin subir', 'warn', 'cloud') : null], onBack: backTo }),
+      R.isOpen(l) ? h('div', { class: 'live-card flat' }, h('div', { class: 'live-time' }, icon('clock', 18), h('b', null, fmtDur(hrs)), h('span', null, R.isPaused(l) ? 'trabajadas (en pausa)' : 'trabajadas'), l['Hora inicio'] ? h('em', null, `desde ${fmtDate(l['Fecha inicio'], false)} ${l['Hora inicio']}`) : null), laborButtons(l, { size: 'lg' })) : null,
       section('Información general', card([
         kv('Campaña', l['Campaña']), kv('Lote', R.laborPlace(l)), kv('Unidad', l['Unidad']), kv('Cultivo', l['Cultivo']), kv('Variedad / híbrido', l['Variedad / híbrido']),
         kv('Inicio', l['Fecha inicio'] ? `${fmtDate(l['Fecha inicio'])}${l['Hora inicio'] ? ' · ' + l['Hora inicio'] : ''}` : ''),

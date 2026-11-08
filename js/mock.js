@@ -1,7 +1,8 @@
 // Simulador de la planilla: lo usa el "modo demo" dentro de la app y el servidor de pruebas.
 // Imita lo que hace Code.gs (Apps Script): devuelve celdas como las muestra la planilla
 // (fechas dd/MM/yyyy, horas HH:mm, duraciones H:MM) y escribe de forma idempotente.
-import { TABLES, TABLE_KEYS, CONFIG_SHEET, DEFAULT_LISTS, kindOf } from './schema.js';
+import { TABLES, TABLE_KEYS, CONFIG_SHEET, DEFAULT_LISTS, kindOf, strictError } from './schema.js';
+import { normalizeConfig } from './model.js';
 import { pad, todayStr } from './util.js';
 
 function toCell(kind, v) {
@@ -40,6 +41,12 @@ export function createMock(initial) {
         if (!T) throw new Error('Tabla desconocida: ' + op.tk);
         const s = state.sheets[T.sheet];
         const keyIdx = s.headers.indexOf(T.key);
+        // igual que la planilla real: un valor fuera de lista en una celda con validación estricta se rechaza
+        const lists = normalizeConfig(state.config);
+        for (const [h, v] of Object.entries(op.t === 'append' ? op.rec : op.set || {})) {
+          const msg = strictError(op.tk, h, v, lists);
+          if (msg) throw new Error(msg);
+        }
         if (op.t === 'append') {
           const k = op.rec[T.key];
           if (k === undefined || k === '') throw new Error('Falta el ID');

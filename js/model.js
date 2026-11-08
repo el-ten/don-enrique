@@ -60,6 +60,14 @@ export function normalizeRead(payload) {
 }
 
 // ---- cambios pendientes ----
+// Versiones anteriores de la app mandaban "Estado labor" = "Pausada", un valor que la planilla no acepta.
+// Si quedó un cambio así guardado en el celular, se limpia: la pausa se marca solo con "Inicio pausa actual".
+export function cleanLegacySet(set) {
+  if (!set || set['Estado labor'] !== 'Pausada') return set;
+  const { 'Estado labor': _drop, ...rest } = set;
+  return rest;
+}
+
 export function applyOp(tables, op) {
   const T = TABLES[op.tk];
   const rows = tables[op.tk];
@@ -72,7 +80,7 @@ export function applyOp(tables, op) {
     else rows.push({ ...emptyRow(op.tk), ...op.rec, _pending: true });
   } else if (op.t === 'update') {
     const ex = rows.find((r) => r[keyCol] === op.key);
-    if (ex) { Object.assign(ex, op.set); ex._pending = true; }
+    if (ex) { Object.assign(ex, cleanLegacySet(op.set)); ex._pending = true; }
   }
 }
 

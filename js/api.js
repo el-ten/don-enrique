@@ -1,7 +1,7 @@
 // Comunicación con la planilla: por Apps Script (modo real) o con el simulador interno (modo demo).
 import { createMock, demoSeed } from './mock.js';
 import { store } from './store.js';
-import { toWire } from './model.js';
+import { toWire, cleanLegacySet } from './model.js';
 
 export class NetworkError extends Error {}
 export class ServerError extends Error { constructor(msg, code) { super(msg); this.code = code; } }
@@ -54,7 +54,7 @@ async function call(body, timeoutMs = 25000, override = null) {
 export function toWireOp(op) {
   const o = { id: op.id, t: op.t, tk: op.tk };
   if (op.t === 'append') o.rec = toWire(op.tk, op.rec);
-  else { o.key = op.key; o.set = toWire(op.tk, op.set); }
+  else { o.key = op.key; o.set = toWire(op.tk, cleanLegacySet(op.set)); }
   return o;
 }
 
