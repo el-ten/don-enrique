@@ -1,6 +1,6 @@
 // Piezas de interfaz: elementos, avisos, hojas inferiores, selector y motor de formularios.
 import { icon } from './icons.js';
-import { isBlank, parseInputNumber, formatInputNumber } from './util.js';
+import { isBlank, parseInputNumber, formatInputNumber, fmtDate } from './util.js';
 
 export function h(tag, props, ...children) {
   const el = document.createElement(tag);
@@ -137,6 +137,7 @@ export function openForm({ title, subtitle, fields, values = {}, submitLabel = '
     return x || '';
   };
 
+  const pickShown = (f, x) => (x ? (f.type === 'date' ? fmtDate(x) : x) : (f.placeholder || (f.type === 'date' ? 'Elegir fecha' : 'Elegir hora')));
   const isShown = (f) => (f.show ? !!f.show(v) : true);
   const isReq = (f) => (typeof f.required === 'function' ? !!f.required(v) : !!f.required);
 
@@ -179,9 +180,15 @@ export function openForm({ title, subtitle, fields, values = {}, submitLabel = '
         break;
       }
       case 'date':
-      case 'time':
-        control = h('input', { id: `f_${f.name}`, class: 'input', type: f.type, value: val || '', onchange: (e) => change(e.target.value, true, true) });
+      case 'time': {
+        // El texto que se ve lo dibuja la app (alineado a la izquierda y centrado en alto); el campo nativo del iPhone
+        // queda encima, transparente, y abre igual el selector de fecha/hora al tocarlo. Así no depende de cómo Safari dibuja el texto.
+        control = h('div', { class: `input pick-wrap${val ? '' : ' empty'}` },
+          h('span', { class: 'pick-shown' }, pickShown(f, val)),
+          icon(f.type === 'date' ? 'calendar' : 'clock', 18),
+          h('input', { id: `f_${f.name}`, class: 'pick-native', type: f.type, value: val || '', 'aria-label': f.label, onchange: (e) => change(e.target.value, true, true) }));
         break;
+      }
       case 'select': {
         const opts = (typeof f.options === 'function' ? f.options(v) : f.options || []).map((o) => (typeof o === 'string' ? { value: o, label: o } : o));
         const sel = h('select', { id: `f_${f.name}`, class: 'input select', onchange: (e) => change(e.target.value) },
@@ -229,6 +236,10 @@ export function openForm({ title, subtitle, fields, values = {}, submitLabel = '
     if (prev) {
       const inp = prev.matches('input,textarea') ? prev : prev.querySelector('input,textarea');
       if (inp && document.activeElement !== inp) { const want = wantText(f); if (inp.value !== want) inp.value = want; }
+      if (prev.classList && prev.classList.contains('pick-wrap')) { // fecha / hora: el texto que se ve se actualiza aunque el campo se reutilice
+        prev.querySelector('.pick-shown').textContent = pickShown(f, val);
+        prev.classList.toggle('empty', !val);
+      }
       const oldSug = prev.querySelector ? prev.querySelector('.sug') : null;
       const newSug = control.querySelector ? control.querySelector('.sug') : null;
       if (oldSug && newSug) oldSug.replaceWith(newSug); else if (newSug && !oldSug) prev.append(newSug); else if (oldSug && !newSug) oldSug.remove();
