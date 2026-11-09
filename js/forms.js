@@ -126,7 +126,7 @@ export function laborForm(book, { mode = 'curso', labor = null } = {}) {
         // si con este cambio la labor pasa a "Terminado" y es de servicio, también se carga en la hoja de servicios
         const serv = labor['Estado labor'] !== 'Terminado' && set['Estado labor'] === 'Terminado' ? R.opsServicio(live(), { ...labor, ...set }) : [];
         await store.enqueue([{ t: 'update', tk: 'labores', key: labor['ID labor'], set }, ...serv]);
-        toast(serv.length ? 'Cambios guardados y servicio cargado' : 'Cambios guardados');
+        toast(serv.length ? `Cambios guardados y ${serv[0].t === 'update' ? 'labor sumada a su servicio' : 'servicio cargado'}` : 'Cambios guardados');
       } else {
         const rec = compact({
           'ID labor': uid8(), ...base,
@@ -135,7 +135,7 @@ export function laborForm(book, { mode = 'curso', labor = null } = {}) {
         const full = { ...emptyRow('labores'), ...rec };
         const serv = manual ? R.opsServicio(live(), full) : [];
         await store.enqueue([{ t: 'append', tk: 'labores', rec: full }, ...serv]);
-        toast(manual ? (serv.length ? 'Labor guardada y servicio cargado' : 'Labor guardada') : 'Labor iniciada');
+        toast(manual ? (serv.length ? `Labor guardada y ${serv[0].t === 'update' ? 'sumada a su servicio' : 'servicio cargado'}` : 'Labor guardada') : 'Labor iniciada');
       }
     },
   });
@@ -152,7 +152,7 @@ export function finalizarForm(labor) {
       // labor de servicio: se carga sola en la hoja de servicios (R.opsServicio devuelve [] si no corresponde)
       const serv = R.opsServicio(store.book, { ...labor, ...ops[0].set });
       await store.enqueue([...ops, ...serv]);
-      toast(serv.length ? 'Labor finalizada y cargada en Servicios' : 'Labor finalizada');
+      toast(serv.length ? `Labor finalizada y ${serv[0].t === 'update' ? 'sumada a su servicio' : 'cargada en Servicios'}` : 'Labor finalizada');
     },
   });
 }

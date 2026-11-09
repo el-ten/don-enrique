@@ -321,13 +321,39 @@ export function laborEsServicio(l) { return l['Unidad'] === 'SER' && TAREAS_SERV
 export function servicioDeLabor(book, id) {
   return (book.serv || []).find((s) => splitList(s['ID labor vinculada']).includes(id)) || null;
 }
-// Devuelve el cambio que agrega el servicio de una labor recién terminada (o [] si no corresponde):
+// Servicio ya cargado al que se suma esta labor: misma campaña, mismo cliente, mismo lote, mismo cultivo y mismo tipo
+// (por ejemplo, un lote que se sembró en dos tandas es UN servicio con la suma de las hectáreas). Sin lote o sin
+// cliente no se agrupa, porque no hay forma de saber si es el mismo trabajo. No se suma a servicios cancelados.
+export function servicioParaAgrupar(book, l) {
+  if (isBlank(l['Lote']) || isBlank(l['Campo / cliente'])) return null;
+  const hay = (book.serv || []).filter((s) =>
+    norm(s['Campaña']) === norm(l['Campaña']) && norm(s['Cliente']) === norm(l['Campo / cliente']) &&
+    norm(s['Campo / lote']) === norm(l['Lote']) && norm(s['Cultivo']) === norm(l['Cultivo']) &&
+    norm(s['Tipo servicio']) === norm(l['Tarea']) && (isBlank(s['Estado servicio']) || s['Estado servicio'] === 'Terminado'));
+  return hay.length ? hay[hay.length - 1] : null;
+}
+// Cambio que suma una labor terminada a un servicio que ya existe: hectáreas, fechas y labores vinculadas.
+// La tarifa, la entidad y lo demás de ese servicio no se tocan (el ingreso se recalcula solo con las hectáreas nuevas).
+export function opsSumarAServicio(s, l) {
+  const ha = (Number(s['Ha del servicio']) || 0) + (Number(l['Ha realizadas']) || 0);
+  const ini = [s['Fecha inicio'], l['Fecha inicio']].filter(Boolean).sort()[0];
+  const fin = [s['Fecha fin'], l['Fecha fin'] || l['Fecha inicio']].filter(Boolean).sort().pop();
+  const nuevo = { 'Ha del servicio': ha || null, 'Fecha inicio': ini, 'Fecha fin': fin, 'ID labor vinculada': [...splitList(s['ID labor vinculada']), l['ID labor']].join(', ') };
+  const set = {};
+  for (const [k, v] of Object.entries(nuevo)) if (v !== undefined && v !== null && v !== '' && v !== s[k]) set[k] = v;
+  return [{ t: 'update', tk: 'serv', key: s['ID servicio'], set }];
+}
+
+// Devuelve el cambio que carga el servicio de una labor recién terminada (o [] si no corresponde):
 // no es de servicio, no está terminada, ya tiene su servicio, o la planilla todavía no tiene la hoja conectada
 // (book.hasServ: el script de Google se actualizó y la app ya leyó la hoja de servicios al menos una vez).
+// Si ya hay un servicio del mismo lote, cultivo y campaña, la labor se suma a ese en lugar de crear otro.
 export function opsServicio(book, l) {
   if (!book || !book.hasServ || !l || !l['ID labor']) return [];
   if (l['Estado labor'] !== 'Terminado' || !laborEsServicio(l)) return [];
   if (servicioDeLabor(book, l['ID labor'])) return [];
+  const grupo = servicioParaAgrupar(book, l);
+  if (grupo) return opsSumarAServicio(grupo, l);
   const nov = String(l['Novedades'] || '').trim();
   const datos = {
     'ID servicio': `SER-${uid8()}`,
