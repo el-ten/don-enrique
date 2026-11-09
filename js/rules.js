@@ -294,3 +294,18 @@ export function cargasPendientesTicket(book) { return book.cargas.filter((c) => 
 export function cropColor(c) {
   return { Trigo: 'trigo', Soja: 'soja', Maíz: 'maiz', Centeno: 'centeno' }[c] || 'otro';
 }
+
+// Al cambiar el nombre de un campo o de un lote, las labores vinculadas a ese lote (por ID lote) que todavía tienen el
+// nombre anterior pasan a tener el nuevo. Si una labor ya tenía un nombre distinto (porque alguien lo corrigió a mano),
+// no se toca. `nuevo` = datos del lote ya editado ('Campo', 'Lote físico').
+export function laboresARenombrar(labores, lote, nuevo) {
+  const out = [];
+  for (const l of labores) {
+    if (!lote['ID lote'] || l['ID lote vinculado'] !== lote['ID lote']) continue;
+    const set = {};
+    if (nuevo['Campo'] !== lote['Campo'] && norm(l['Campo / cliente']) === norm(lote['Campo']) && l['Campo / cliente'] !== nuevo['Campo']) set['Campo / cliente'] = nuevo['Campo'];
+    if (nuevo['Lote físico'] !== lote['Lote físico'] && norm(l['Lote']) === norm(lote['Lote físico']) && l['Lote'] !== nuevo['Lote físico']) set['Lote'] = nuevo['Lote físico'];
+    if (Object.keys(set).length) out.push({ key: l['ID labor'], set });
+  }
+  return out;
+}

@@ -420,7 +420,18 @@ export function loteForm(book, lote = null, { prefill = {}, onCreated = null, on
       if (lote) {
         const set = diff(lote, data);
         if (!Object.keys(set).length) return;
-        await store.enqueue([{ t: 'update', tk: 'lotes', key: lote['ID lote'], set }]);
+        const ops = [{ t: 'update', tk: 'lotes', key: lote['ID lote'], set }];
+        // Si cambió el nombre del campo o del lote, se ofrece actualizarlo también en las labores de ese lote.
+        const ren = ('Campo' in set || 'Lote físico' in set) ? R.laboresARenombrar((store.book || book).labores, lote, data) : [];
+        if (ren.length) {
+          const si = await confirmDialog({
+            title: 'Actualizar también las labores',
+            message: `Este lote tiene ${ren.length} ${ren.length === 1 ? 'labor cargada' : 'labores cargadas'} con el nombre anterior. ¿Cambiarles el nombre a «${data['Campo']} · ${data['Lote físico']}»?`,
+            confirmLabel: 'Sí, actualizar', cancelLabel: 'Solo el lote',
+          });
+          if (si) ops.push(...ren.map((r) => ({ t: 'update', tk: 'labores', key: r.key, set: r.set })));
+        }
+        await store.enqueue(ops);
       } else {
         const id = uid8();
         await store.enqueue([{ t: 'append', tk: 'lotes', rec: { ...emptyRow('lotes'), 'ID lote': id, ...compact(data) } }]);
