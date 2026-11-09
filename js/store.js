@@ -95,6 +95,12 @@ export const store = {
     this.rebuild();
   },
 
+  // La planilla se consultó y no cambió nada: solo se anota la hora, sin redibujar la pantalla.
+  async touchSync() {
+    this.sync.lastSync = new Date().toISOString();
+    if (this.config.mode) await kvSet(`meta:${this.config.mode}`, { lastSync: this.sync.lastSync });
+  },
+
   rebuild() {
     this.book = buildBook(this.snapshot, this.ops.filter((o) => !o.failed));
     this.emit();

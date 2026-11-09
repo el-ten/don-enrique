@@ -115,7 +115,7 @@ async function boot() {
   window.addEventListener('hashchange', () => route(true));
   route(true);
   startAutoSync();
-  if (store.config.mode === 'live') sync();
+  if (store.config.mode === 'live') sync({ quiet: true });
   else if (store.config.mode === 'demo' && !store.snapshot) sync();
   // reloj de la pantalla (tiempos de labores abiertas)
   setInterval(() => { if (document.visibilityState === 'visible' && !document.body.classList.contains('noscroll')) safeRender(); }, 30000);
