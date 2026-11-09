@@ -51,6 +51,14 @@ export const TABLES = {
     kinds: { 'Capacidad kg': 'num' },
     formulaCols: [],
   },
+  // Servicios a terceros. La app carga una fila sola cuando termina una labor de servicio (ver servicioDeLabor en rules.js).
+  // Las columnas W en adelante de esa hoja son tableros de control, no forman parte de la tabla.
+  serv: {
+    sheet: '09_SERVICIOS', key: 'ID servicio', label: 'Servicios',
+    headers: ['ID servicio', 'Campaña', 'Fecha inicio', 'Fecha fin', 'Cliente', 'Campo / lote', 'Cultivo', 'Tipo servicio', 'Ha del servicio', 'Tipo tarifa', 'Tarifa', 'Moneda / cereal', 'Producción base kg', 'Ingreso bruto USD', 'Ingreso bruto cereal kg', 'Entidad comercial informada', 'ID labor vinculada', 'ID producción vinculada', 'Estado servicio', 'Estado dato', 'Observaciones'],
+    kinds: { 'Fecha inicio': 'date', 'Fecha fin': 'date', 'Ha del servicio': 'num', 'Tarifa': 'num', 'Producción base kg': 'num', 'Ingreso bruto USD': 'num', 'Ingreso bruto cereal kg': 'num' },
+    formulaCols: ['Ingreso bruto USD', 'Ingreso bruto cereal kg'],
+  },
 };
 
 // Hoja de listas (catálogos). Se lee completa (primeras 21 filas).
@@ -80,6 +88,9 @@ export const DEFAULT_LISTS = {
   'Tipo movimiento combustible': ['Stock inicial', 'Compra / ingreso', 'Transferencia interna', 'Carga a maquinaria', 'Devolución', 'Salida a tercero', 'Ajuste positivo', 'Ajuste negativo'],
   'Producto combustible': ['Gasoil', 'Nafta', 'AdBlue', 'Otro'],
   'Tipo documento gasto': ['Factura A', 'Factura B', 'Factura C', 'Nota de crédito', 'Nota de débito', 'Recibo', 'Ticket', 'Remito', 'Compra sin comprobante', 'Presupuesto / compromiso', 'Registro operativo'],
+  'Tipo servicio': ['Siembra', 'Cosecha', 'Pulverización', 'Fertilización', 'Otro'],
+  'Tipo tarifa servicio': ['USD/ha', '% producción', 'Importe fijo', 'Sin definir'],
+  'Entidad comercial': ['SH', 'David', 'Pendiente'],
 };
 
 // Reglas de validación ESTRICTAS de la planilla real (revisadas el 08/11/2026). Si se escribe en una celda un valor
@@ -95,6 +106,8 @@ export const STRICT = {
   prod: { 'Campaña': S_CAMP, 'Unidad': { cfg: 'Unidades' }, 'Cultivo': { cfg: 'Cultivos' }, 'Tipo / época': { cfg: 'Tipo / época' }, 'Estado dato': S_DATO },
   movs: { 'Campaña': S_CAMP, 'Unidad': { cfg: 'Unidades' }, 'Cultivo': { cfg: 'Cultivos' }, 'Tipo de movimiento': { cfg: 'Tipo de movimiento' }, 'Monotolva utilizada': { cfg: 'Monotolva utilizada' }, 'Equipo / recipiente': { cfg: 'Equipo o recipiente' }, 'Computa producción': { lit: ['Sí', 'No'] } },
   comb: { 'Campaña': S_CAMP, 'Tipo movimiento': { cfg: 'Tipo movimiento combustible' }, 'Producto': { cfg: 'Producto combustible' }, 'Unidad económica': { cfg: 'Unidad imputada gasto' }, 'Responsable': { cfg: 'Operadores' }, 'Documento / origen': { cfg: 'Tipo documento gasto' }, 'Estado dato': S_DATO, 'Computa consumo labor': { lit: ['Sí', 'No', 'Pendiente por verificar'] } },
+  // 09_SERVICIOS (revisado el 09/11/2026): Estado servicio usa la misma lista que Estado labor
+  serv: { 'Campaña': S_CAMP, 'Cultivo': { cfg: 'Cultivos' }, 'Tipo servicio': { cfg: 'Tipo servicio' }, 'Tipo tarifa': { cfg: 'Tipo tarifa servicio' }, 'Moneda / cereal': { lit: ['Maíz', 'Soja', 'Trigo', 'USD'] }, 'Entidad comercial informada': { cfg: 'Entidad comercial' }, 'Estado servicio': { cfg: 'Estado labor' }, 'Estado dato': S_DATO },
 };
 
 // Devuelve el texto del error (el mismo tipo de mensaje que da Google) o null si el valor es aceptable.

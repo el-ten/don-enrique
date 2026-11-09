@@ -105,7 +105,10 @@ export function buildBook(snapshot, ops) {
   const cfg = { ...DEFAULT_LISTS };
   const sc = (snapshot && snapshot.cfg) || {};
   for (const k of Object.keys(sc)) if (sc[k] && sc[k].length) cfg[k] = sc[k];
-  const book = { ...tables, tables, cfg };
+  // La hoja de servicios solo aparece si el script de Google ya la conoce (si es una versión vieja del script, la
+  // lectura no la trae). Sin eso la app no genera servicios, para no mandarle cambios que no entiende.
+  const hasServ = !!(snapshot && snapshot.tables && snapshot.tables.serv);
+  const book = { ...tables, tables, cfg, hasServ };
   return book;
 }
 

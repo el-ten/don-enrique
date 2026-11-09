@@ -123,15 +123,19 @@ export function laborForm(book, { mode = 'curso', labor = null } = {}) {
           set[k] = val;
         }
         if (!Object.keys(set).length) { toast('No hubo cambios', 'info'); return; }
-        await store.enqueue([{ t: 'update', tk: 'labores', key: labor['ID labor'], set }]);
-        toast('Cambios guardados');
+        // si con este cambio la labor pasa a "Terminado" y es de servicio, también se carga en la hoja de servicios
+        const serv = labor['Estado labor'] !== 'Terminado' && set['Estado labor'] === 'Terminado' ? R.opsServicio(live(), { ...labor, ...set }) : [];
+        await store.enqueue([{ t: 'update', tk: 'labores', key: labor['ID labor'], set }, ...serv]);
+        toast(serv.length ? 'Cambios guardados y servicio cargado' : 'Cambios guardados');
       } else {
         const rec = compact({
           'ID labor': uid8(), ...base,
           ...(manual ? {} : { 'Fecha inicio': todayStr(), 'Hora inicio': nowTime(), 'Estado labor': 'En curso', 'Estado dato': 'Confirmado' }),
         });
-        await store.enqueue([{ t: 'append', tk: 'labores', rec: { ...emptyRow('labores'), ...rec } }]);
-        toast(manual ? 'Labor guardada' : 'Labor iniciada');
+        const full = { ...emptyRow('labores'), ...rec };
+        const serv = manual ? R.opsServicio(live(), full) : [];
+        await store.enqueue([{ t: 'append', tk: 'labores', rec: full }, ...serv]);
+        toast(manual ? (serv.length ? 'Labor guardada y servicio cargado' : 'Labor guardada') : 'Labor iniciada');
       }
     },
   });
@@ -143,7 +147,13 @@ export function finalizarForm(labor) {
     submitLabel: 'Finalizar labor', tone: 'primary',
     fields: [{ name: 'ha', label: 'Hectáreas realizadas', type: 'number', unit: 'ha', required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null), hint: 'Se guarda la fecha y hora de fin de ahora.' }],
     values: { ha: labor['Ha realizadas'] || null },
-    onSubmit: async (v) => { await store.enqueue(R.labOpsFinalizar(labor, v.ha)); toast('Labor finalizada'); },
+    onSubmit: async (v) => {
+      const ops = R.labOpsFinalizar(labor, v.ha);
+      // labor de servicio: se carga sola en la hoja de servicios (R.opsServicio devuelve [] si no corresponde)
+      const serv = R.opsServicio(store.book, { ...labor, ...ops[0].set });
+      await store.enqueue([...ops, ...serv]);
+      toast(serv.length ? 'Labor finalizada y cargada en Servicios' : 'Labor finalizada');
+    },
   });
 }
 

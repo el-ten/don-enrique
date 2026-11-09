@@ -1,5 +1,6 @@
 // Reglas de negocio: réplica de lo que hace AppSheet (fórmulas virtuales y acciones).
 import { isBlank, norm, dtToMs, dateTimeToMs, todayStr, nowTime, nowDT, uid8, unique, splitList, campaignFor } from './util.js';
+import { emptyRow } from './model.js';
 
 export const TOL_KG = 100;
 // OJO: la planilla solo acepta los estados de 01_CONFIGURACION (columna "Estado labor"), que no incluye "Pausada".
@@ -308,4 +309,35 @@ export function laboresARenombrar(labores, lote, nuevo) {
     if (Object.keys(set).length) out.push({ key: l['ID labor'], set });
   }
   return out;
+}
+
+// ------------------------------------------------------------------ SERVICIOS (hoja 09_SERVICIOS)
+// Una labor de servicio es una labor de la unidad SER (servicios a terceros) de siembra, cosecha, pulverización o
+// fertilización, que son los "Tipo servicio" que reconoce la planilla. Al terminarla, la app carga sola una fila en
+// 09_SERVICIOS con lo que ya se sabe (cliente, lote, cultivo, hectáreas, fechas) y deja pendiente lo comercial
+// (tarifa y entidad que factura), igual que las filas que ya tiene la planilla en esa situación.
+export const TAREAS_SERVICIO = ['Siembra', 'Cosecha', 'Pulverización', 'Fertilización'];
+export function laborEsServicio(l) { return l['Unidad'] === 'SER' && TAREAS_SERVICIO.includes(l['Tarea']); }
+export function servicioDeLabor(book, id) {
+  return (book.serv || []).find((s) => splitList(s['ID labor vinculada']).includes(id)) || null;
+}
+// Devuelve el cambio que agrega el servicio de una labor recién terminada (o [] si no corresponde):
+// no es de servicio, no está terminada, ya tiene su servicio, o la planilla todavía no tiene la hoja conectada
+// (book.hasServ: el script de Google se actualizó y la app ya leyó la hoja de servicios al menos una vez).
+export function opsServicio(book, l) {
+  if (!book || !book.hasServ || !l || !l['ID labor']) return [];
+  if (l['Estado labor'] !== 'Terminado' || !laborEsServicio(l)) return [];
+  if (servicioDeLabor(book, l['ID labor'])) return [];
+  const nov = String(l['Novedades'] || '').trim();
+  const datos = {
+    'ID servicio': `SER-${uid8()}`,
+    'Campaña': l['Campaña'], 'Fecha inicio': l['Fecha inicio'], 'Fecha fin': l['Fecha fin'] || '',
+    'Cliente': l['Campo / cliente'] || '', 'Campo / lote': l['Lote'] || '', 'Cultivo': l['Cultivo'] || '', 'Tipo servicio': l['Tarea'],
+    'Ha del servicio': isBlank(l['Ha realizadas']) ? null : Number(l['Ha realizadas']),
+    'Tipo tarifa': 'Sin definir', 'Entidad comercial informada': 'Pendiente',
+    'ID labor vinculada': l['ID labor'], 'Estado servicio': 'Terminado', 'Estado dato': l['Estado dato'] || 'Confirmado',
+    'Observaciones': `Cargado automáticamente al terminar la labor. Tarifa y entidad comercial pendientes de definir.${nov ? ` Novedades de la labor: ${nov}` : ''}`,
+  };
+  const rec = { ...emptyRow('serv'), ...Object.fromEntries(Object.entries(datos).filter(([, v]) => !(v === '' || v === null || v === undefined))) };
+  return [{ t: 'append', tk: 'serv', rec }];
 }

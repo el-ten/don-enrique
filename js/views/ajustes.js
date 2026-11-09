@@ -21,7 +21,7 @@ function describeOp(op) {
   const nombre = T ? T.label : op.tk;
   if (op.t === 'append') {
     const r = op.rec;
-    const det = r['Camión / patente'] || r['Tarea'] || r['Nombre silo'] || r['Tipo movimiento'] || r['Tipo de movimiento'] || r['Campo'] || '';
+    const det = r['Camión / patente'] || r['Tarea'] || r['Tipo servicio'] || r['Nombre silo'] || r['Tipo movimiento'] || r['Tipo de movimiento'] || r['Campo'] || '';
     return `Nuevo en ${nombre}${det ? ': ' + det : ''}`;
   }
   return `Cambio en ${nombre} (${Object.keys(op.set).slice(0, 3).join(', ')}${Object.keys(op.set).length > 3 ? '…' : ''})`;
