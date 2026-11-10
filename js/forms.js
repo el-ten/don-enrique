@@ -2,7 +2,7 @@
 import { store } from './store.js';
 import { openForm, confirmDialog, toast } from './ui.js';
 import * as R from './rules.js';
-import { todayStr, nowTime, uid8, isBlank, splitList, joinList, unique, sortEs, fmtKg, fmtDate, fmt2, norm } from './util.js';
+import { todayStr, nowTime, isBlank, splitList, joinList, unique, sortEs, fmtKg, fmtDate, fmt2, norm } from './util.js';
 import { emptyRow } from './model.js';
 import { TABLES } from './schema.js';
 
@@ -129,7 +129,7 @@ export function laborForm(book, { mode = 'curso', labor = null } = {}) {
         toast(serv.length ? `Cambios guardados y ${serv[0].t === 'update' ? 'labor sumada a su servicio' : 'servicio cargado'}` : 'Cambios guardados');
       } else {
         const rec = compact({
-          'ID labor': uid8(), ...base,
+          'ID labor': R.nuevoId(live(), 'labores', base), ...base,
           ...(manual ? {} : { 'Fecha inicio': todayStr(), 'Hora inicio': nowTime(), 'Estado labor': 'En curso', 'Estado dato': 'Confirmado' }),
         });
         const full = { ...emptyRow('labores'), ...rec };
@@ -254,7 +254,7 @@ export function siloForm(book, silo = null) {
         if (!Object.keys(set).length) return;
         await store.enqueue([{ t: 'update', tk: 'silos', key: silo['ID silo'], set }]);
       } else {
-        await store.enqueue([{ t: 'append', tk: 'silos', rec: { ...emptyRow('silos'), 'ID silo': uid8(), ...compact(data) } }]);
+        await store.enqueue([{ t: 'append', tk: 'silos', rec: { ...emptyRow('silos'), 'ID silo': R.nuevoId(store.book || book, 'silos'), ...compact(data) } }]);
       }
       toast('Silo guardado');
     },
@@ -337,7 +337,7 @@ export function prodForm(book, prod = null) {
         if (!Object.keys(set).length) return;
         await store.enqueue([{ t: 'update', tk: 'prod', key: prod['ID producción'], set }]);
       } else {
-        await store.enqueue([{ t: 'append', tk: 'prod', rec: { ...emptyRow('prod'), 'ID producción': uid8(), ...compact(data) } }]);
+        await store.enqueue([{ t: 'append', tk: 'prod', rec: { ...emptyRow('prod'), 'ID producción': R.nuevoId(store.book || book, 'prod', data), ...compact(data) } }]);
       }
       toast('Producción guardada');
     },
@@ -453,7 +453,7 @@ export function combustibleForm(book, mov = null, preset = {}) {
     ],
     values: v0,
     onSubmit: async (v) => {
-      const rec = R.combRecipe(book, v);
+      const rec = R.combRecipe(store.book || book, v);
       if (edit) {
         const { 'ID movimiento combustible': _id, ...rest } = rec;
         const set = diff(mov, rest);
@@ -515,7 +515,7 @@ export function loteForm(book, lote = null, { prefill = {}, onCreated = null, on
         }
         await store.enqueue(ops);
       } else {
-        const id = uid8();
+        const id = R.nuevoId(store.book || book, 'lotes', data);
         await store.enqueue([{ t: 'append', tk: 'lotes', rec: { ...emptyRow('lotes'), 'ID lote': id, ...compact(data) } }]);
         if (onCreated) onCreated(id);
       }

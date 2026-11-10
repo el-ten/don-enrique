@@ -273,7 +273,7 @@ export function combustibleResumen(book) {
 export function combRecipe(book, v) {
   const lab = v['ID labor vinculada'] ? book.labores.find((l) => l['ID labor'] === v['ID labor vinculada']) : null;
   return {
-    'ID movimiento combustible': uid8(), 'Campaña': v['Campaña'], 'Fecha': v['Fecha'], 'Hora': v['Hora'] || '', 'Tipo movimiento': v['Tipo movimiento'],
+    'ID movimiento combustible': nuevoId(book, 'comb', v), 'Campaña': v['Campaña'], 'Fecha': v['Fecha'], 'Hora': v['Hora'] || '', 'Tipo movimiento': v['Tipo movimiento'],
     'Producto': v['Producto'], 'Litros': Number(v['Litros']), 'Origen': v['Origen'] || '', 'Destino': v['Destino'] || '',
     'Unidad económica': v['Unidad económica'] || (lab ? lab['Unidad'] : ''), 'Campo / cliente': v['Campo / cliente'] || (lab ? lab['Campo / cliente'] : ''),
     'Lote': v['Lote'] || (lab ? lab['Lote'] : ''), 'Activo abastecido': v['Activo abastecido'] || '', 'ID labor vinculada': v['ID labor vinculada'] || '',
@@ -356,7 +356,7 @@ export function opsServicio(book, l) {
   if (grupo) return opsSumarAServicio(grupo, l);
   const nov = String(l['Novedades'] || '').trim();
   const datos = {
-    'ID servicio': `SER-${uid8()}`,
+    'ID servicio': nuevoId(book, 'serv', { 'Campaña': l['Campaña'], 'Tipo servicio': l['Tarea'], 'Cultivo': l['Cultivo'] }),
     'Campaña': l['Campaña'], 'Fecha inicio': l['Fecha inicio'], 'Fecha fin': l['Fecha fin'] || '',
     'Cliente': l['Campo / cliente'] || '', 'Campo / lote': l['Lote'] || '', 'Cultivo': l['Cultivo'] || '', 'Tipo servicio': l['Tarea'],
     'Ha del servicio': isBlank(l['Ha realizadas']) ? null : Number(l['Ha realizadas']),
@@ -456,4 +456,66 @@ export function servicioTarifaSet(s, v) {
   const set = {};
   for (const [k, val] of Object.entries(nuevo)) if (!mismo(s[k], val)) set[k] = val === undefined ? '' : val;
   return set;
+}
+
+// ------------------------------------------------------------------ IDs con el formato de la planilla
+// La planilla ya tiene su forma de numerar: LAB-2627-SSZ-001, SER-2526-MSZ-003, PROD-2526-S-012, COMB-2627-004,
+// SILO-03, CP-01. La app la sigue: toma el siguiente número libre de ese grupo mirando lo que ya hay (incluidos los
+// cambios que todavía no se enviaron, así dos altas seguidas sin señal no repiten número). Lo que no tiene un formato
+// propio en la planilla (cargas de camión y movimientos de cosecha) sigue con un código al azar.
+const sinTildes = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '');
+const soloLetras = (s) => sinTildes(s).toUpperCase().replace(/[^A-Z]/g, '');
+// "2026/27" → "2627"
+function campCorta(c) {
+  const m = /^(\d{4})\/(\d{2})$/.exec(String(c || '').trim());
+  return m ? m[1].slice(2) + m[2] : null;
+}
+const LETRA_CULTIVO = { maiz: 'M', soja: 'S', trigo: 'T', centeno: 'C' };
+const letraCultivo = (c) => LETRA_CULTIVO[norm(sinTildes(c))] || soloLetras(c)[0] || 'X';
+// Código de la tarea dentro del ID. Las labores de siembra de trigo y centeno van juntas como TRI (así están en la
+// planilla); en los servicios cada cultivo tiene el suyo (TSZ para trigo).
+function codigoTarea(tarea, cultivo, estilo) {
+  const t = norm(sinTildes(tarea));
+  const hayCultivo = !isBlank(cultivo);
+  if (t === 'siembra') {
+    if (!hayCultivo) return 'SIE';
+    if (estilo === 'labor' && ['trigo', 'centeno'].includes(norm(sinTildes(cultivo)))) return 'TRI';
+    return `${letraCultivo(cultivo)}SZ`;
+  }
+  if (t === 'cosecha') return hayCultivo ? `${letraCultivo(cultivo)}CO` : 'COS';
+  if (t === 'fertilizacion') return 'FER';
+  if (t === 'pulverizacion') return 'PUL';
+  return soloLetras(tarea).slice(0, 3) || 'GEN';
+}
+// Prefijo del lote: el que ya usa ese campo en la planilla (CP-01, ABC-02…); si es un campo nuevo, sus tres primeras letras.
+function prefijoLote(book, d) {
+  const campo = norm(d['Campo']);
+  const conocido = (book.lotes || []).find((l) => campo && norm(l['Campo']) === campo && /^[A-Z]{2,4}-\d+$/.test(String(l['ID lote'] || '')));
+  if (conocido) return conocido['ID lote'].split('-')[0];
+  if (d['Unidad'] === 'CP-SH') return 'CP';
+  return soloLetras(String(d['Campo'] || '').split(/\s+/)[0]).slice(0, 3) || 'LOT';
+}
+function siguienteId(filas, col, prefijo, ancho) {
+  const re = new RegExp(`^${prefijo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)$`);
+  let max = 0;
+  for (const f of filas || []) {
+    const m = re.exec(String(f[col] || ''));
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return `${prefijo}${String(max + 1).padStart(ancho, '0')}`;
+}
+// ID nuevo para una fila de la tabla `tk` (clave de schema.js). `d` = los datos de la fila que ya se conocen
+// (campaña, tarea, cultivo, campo…). `book` tiene que incluir los cambios pendientes (store.book).
+export function nuevoId(book, tk, d = {}) {
+  const b = book || {};
+  const camp = campCorta(d['Campaña']) || campCorta(campaignFor());
+  switch (tk) {
+    case 'labores': return siguienteId(b.labores, 'ID labor', `LAB-${camp}-${codigoTarea(d['Tarea'], d['Cultivo'], 'labor')}-`, 3);
+    case 'serv': return siguienteId(b.serv, 'ID servicio', `SER-${camp}-${codigoTarea(d['Tipo servicio'], d['Cultivo'], 'servicio')}-`, 3);
+    case 'prod': return siguienteId(b.prod, 'ID producción', `PROD-${camp}-${letraCultivo(d['Cultivo'])}-`, 3);
+    case 'comb': return siguienteId(b.comb, 'ID movimiento combustible', `COMB-${camp}-`, 3);
+    case 'silos': return siguienteId(b.silos, 'ID silo', 'SILO-', 2);
+    case 'lotes': return siguienteId(b.lotes, 'ID lote', `${prefijoLote(b, d)}-`, 2);
+    default: return uid8();
+  }
 }
