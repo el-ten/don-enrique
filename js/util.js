@@ -175,3 +175,4 @@ export function formatInputNumber(x) {
   if (Number.isInteger(n) && Math.abs(n) >= 10000) return String(Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.').replace(/^/, n < 0 ? '-' : '');
   return String(n).replace('.', ',');
 }
+export const fmtUsd = (n) => (isBlank(n) ? '—' : `USD ${nf2.format(n)}`);

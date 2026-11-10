@@ -19,6 +19,8 @@ function toCell(kind, v) {
 
 export function createMock(initial) {
   const state = initial || emptyState();
+  // Un demo guardado por una versión anterior puede no tener las hojas nuevas (servicios, facturación): se las agrega vacías.
+  for (const tk of TABLE_KEYS) { const T = TABLES[tk]; if (!state.sheets[T.sheet]) state.sheets[T.sheet] = { headers: [...T.headers], rows: [] }; }
   const done = new Set(state.done || []);
   state.done = [...done];
 
@@ -110,7 +112,8 @@ function put(state, tk, rec) {
 const dayOffset = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return todayStr(d); };
 
 // Datos de ejemplo 100 % ficticios (para probar la app sin tocar la planilla real).
-export function demoSeed() {
+// servicios = true agrega servicios y un cobro de ejemplo (lo usa el modo demo de la app); las pruebas parten sin ellos.
+export function demoSeed({ servicios = false } = {}) {
   const st = emptyState();
   st.config = configFromLists({
     ...DEFAULT_LISTS,
@@ -154,6 +157,15 @@ export function demoSeed() {
   put(st, 'labores', { 'ID labor': 'demolab4', 'Campaña': '2025/26', 'Fecha inicio': hoy, 'Unidad': 'CA-SH', 'Campo / cliente': 'Don Ramón', 'Lote': 'Bajo', 'Tarea': 'Cosecha', 'Cultivo': 'Trigo', 'Hora inicio': `${two(t0.getHours())}:${two(t0.getMinutes())}`, 'Máquina principal': 'Cosechadora', 'Implemento / equipo': 'Plataforma 25 pies', 'Operadores principales': 'Marcos', 'Estado labor': 'En curso', 'Estado dato': 'Confirmado', 'ID lote vinculado': 'demo0004' });
   put(st, 'cargas', { 'ID carga': 'democar2', 'Campaña': '2025/26', 'Fecha': hoy, 'Camión / patente': 'XY987ZT', 'Cultivo': 'Trigo', 'Destino': 'AFA', 'Estado carga': 'En carga', 'Unidad': 'CA-SH', 'Campo / cliente': 'Don Ramón', 'Lote': 'Bajo', 'ID labor vinculada': 'demolab4', 'Computa producción': 'Sí' });
   put(st, 'movs', { 'ID movimiento': 'demomov3', 'ID carga': 'democar2', 'Campaña': '2025/26', 'Fecha': hoy, 'Unidad': 'CA-SH', 'Campo / cliente': 'Don Ramón', 'Lote': 'Bajo', 'Cultivo': 'Trigo', 'Tipo de movimiento': 'Cosecha a camión', 'Monotolva utilizada': 'Ombú', 'Equipo / recipiente': 'Camión', 'Kg asignados': 12000, 'Destino / ubicación': 'AFA', 'ID labor vinculada': 'demolab4', 'Computa producción': 'Sí' });
+  if (servicios) {
+    // servicios a terceros (nombres inventados) y un cobro, para ver cómo se ve la pantalla de Servicios
+    put(st, 'labores', { 'ID labor': 'demolab5', 'Campaña': '2026/27', 'Fecha inicio': dayOffset(-6), 'Fecha fin': dayOffset(-6), 'Unidad': 'SER', 'Campo / cliente': 'Los Ceibos', 'Lote': 'Frente', 'Tarea': 'Siembra', 'Cultivo': 'Maíz', 'Ha realizadas': 40, 'Hora inicio': '08:00', 'Hora fin': '16:30', 'Pausas / demoras h': 0.5, 'Máquina principal': 'Tractor A', 'Implemento / equipo': 'Sembradora 47', 'Operadores principales': 'Pedro', 'Estado labor': 'Terminado', 'Estado dato': 'Confirmado' });
+    put(st, 'serv', { 'ID servicio': 'SER-DEMO-001', 'Campaña': '2026/27', 'Fecha inicio': dayOffset(-6), 'Fecha fin': dayOffset(-6), 'Cliente': 'Los Ceibos', 'Campo / lote': 'Frente', 'Cultivo': 'Maíz', 'Tipo servicio': 'Siembra', 'Ha del servicio': 40, 'Tipo tarifa': 'USD/ha', 'Tarifa': 65, 'Moneda / cereal': 'USD', 'Entidad comercial informada': 'SH', 'ID labor vinculada': 'demolab5', 'Estado servicio': 'Terminado', 'Estado dato': 'Confirmado' });
+    put(st, 'serv', { 'ID servicio': 'SER-DEMO-002', 'Campaña': '2026/27', 'Fecha inicio': dayOffset(-4), 'Fecha fin': dayOffset(-3), 'Cliente': 'Santa Rita', 'Campo / lote': 'Lote norte', 'Cultivo': 'Soja', 'Tipo servicio': 'Cosecha', 'Ha del servicio': 55, 'Tipo tarifa': '% producción', 'Tarifa': 8, 'Moneda / cereal': 'Soja', 'Producción base kg': 150000, 'Entidad comercial informada': 'Pendiente', 'Estado servicio': 'Terminado', 'Estado dato': 'Confirmado' });
+    put(st, 'serv', { 'ID servicio': 'SER-DEMO-003', 'Campaña': '2026/27', 'Fecha inicio': dayOffset(-2), 'Fecha fin': dayOffset(-2), 'Cliente': 'Los Ceibos', 'Campo / lote': 'Fondo', 'Cultivo': 'Soja', 'Tipo servicio': 'Pulverización', 'Ha del servicio': 30, 'Tipo tarifa': 'Sin definir', 'Entidad comercial informada': 'Pendiente', 'Estado servicio': 'Terminado', 'Estado dato': 'Confirmado', 'Observaciones': 'Cargado automáticamente al terminar la labor. Tarifa y entidad comercial pendientes de definir.' });
+    put(st, 'serv', { 'ID servicio': 'SER-DEMO-004', 'Campaña': '2025/26', 'Fecha inicio': dayOffset(-200), 'Fecha fin': dayOffset(-200), 'Cliente': 'Santa Rita', 'Campo / lote': 'Lote sur', 'Cultivo': 'Soja', 'Tipo servicio': 'Fertilización', 'Ha del servicio': 25, 'Tipo tarifa': 'Importe fijo', 'Tarifa': 1500, 'Moneda / cereal': 'USD', 'Entidad comercial informada': 'SH', 'Estado servicio': 'Terminado', 'Estado dato': 'Confirmado' });
+    put(st, 'fact', { 'ID movimiento': 'FC-DEMO-001', 'ID servicio': 'SER-DEMO-001', 'Campaña': '2026/27', 'Cliente': 'Los Ceibos', 'Tipo movimiento': 'Cobro recibido', 'Modalidad': 'Pendiente de definir', 'Importe imputado USD': 2600, 'Entidad que facturó / cobró': 'SH', 'Estado movimiento': 'Confirmado', 'Estado dato': 'Pendiente', 'Observaciones': 'Cobro confirmado; faltan fecha y comprobante.' });
+  }
   // silos
   put(st, 'silos', { 'ID silo': 'SILO-01', 'Nombre silo': 'Silo 1', 'Tipo': 'Silo de chapa', 'Capacidad kg': 60000, 'Estado': 'Activo', 'Estado dato': 'Confirmado' });
   put(st, 'silos', { 'ID silo': 'SILO-02', 'Nombre silo': 'Silo 2', 'Tipo': 'Silo de chapa', 'Capacidad kg': 40000, 'Estado': 'Activo', 'Estado dato': 'Confirmado' });

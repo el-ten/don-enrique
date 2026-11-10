@@ -27,9 +27,16 @@ function menu({ go, book }) {
         tile('silo', 'Silos', `${fmtKg(stock)} en stock`, 'silos', 'gold'),
         tile('seedling', 'Producción', `${book.prod.length} ${book.prod.length === 1 ? 'registro' : 'registros'}`, 'produccion', 'green'),
         tile('map', 'Campos y lotes', `${book.lotes.length} lotes`, 'lotes', 'earth'),
+        tile('coin', 'Servicios', book.hasServ ? servSub(book) : 'Tarifas y resumen', 'servicios', 'gold'),
         tile('tractor', 'Equipos', `${book.activos.length} equipos`, 'equipos', 'blue'),
         tile('gear', 'Ajustes', 'Conexión y sincronización', 'ajustes', 'slate'))),
   };
+}
+
+// Texto del botón de Servicios: cuántos servicios esperan tarifa.
+function servSub(book) {
+  const sin = book.serv.filter(R.servicioSinTarifa).length;
+  return sin ? `${sin} sin tarifa` : `${book.serv.length} ${book.serv.length === 1 ? 'servicio' : 'servicios'}`;
 }
 
 // ---------------------------------------------------------------- SILOS

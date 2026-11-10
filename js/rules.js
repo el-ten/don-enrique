@@ -367,3 +367,93 @@ export function opsServicio(book, l) {
   const rec = { ...emptyRow('serv'), ...Object.fromEntries(Object.entries(datos).filter(([, v]) => !(v === '' || v === null || v === undefined))) };
   return [{ t: 'append', tk: 'serv', rec }];
 }
+
+// ------------------------------------------------------------------ SERVICIOS: tarifas, ingresos y resumen
+export const TIPOS_TARIFA = ['USD/ha', '% producción', 'Importe fijo', 'Sin definir'];
+export const MONEDAS_SERVICIO = ['USD', 'Maíz', 'Soja', 'Trigo'];
+export const CEREALES_SERVICIO = ['Maíz', 'Soja', 'Trigo'];
+const numOrNull = (v) => (isBlank(v) ? null : Number(v));
+
+export function servicioSinTarifa(s) { return isBlank(s['Tipo tarifa']) || s['Tipo tarifa'] === 'Sin definir'; }
+
+// Ingreso del servicio. Hace las mismas cuentas que las fórmulas de la planilla (columnas "Ingreso bruto USD" e
+// "Ingreso bruto cereal kg") para que se vea al instante, sin esperar a que la hoja se recalcule:
+//   USD/ha        → hectáreas × tarifa, en dólares
+//   % producción  → kilos de producción base × porcentaje ÷ 100, en kilos del cereal
+//   Importe fijo  → la tarifa es el total del servicio: en dólares o en kilos de cereal, según lo que se haya elegido
+export function ingresoServicio(s) {
+  const t = s['Tipo tarifa'], k = numOrNull(s['Tarifa']), ha = numOrNull(s['Ha del servicio']), base = numOrNull(s['Producción base kg']), mon = s['Moneda / cereal'];
+  const nada = { usd: null, kg: null, cereal: '' };
+  if (k === null) return nada;
+  if (t === 'USD/ha' && ha !== null) return { usd: ha * k, kg: null, cereal: '' };
+  if (t === '% producción' && base !== null) return { usd: null, kg: base * k / 100, cereal: mon || s['Cultivo'] || '' };
+  if (t === 'Importe fijo' && !isBlank(mon)) return mon === 'USD' ? { usd: k, kg: null, cereal: '' } : { usd: null, kg: k, cereal: mon };
+  return nada;
+}
+
+export function serviciosDe(book, camp) { return (book.serv || []).filter((s) => !camp || s['Campaña'] === camp); }
+
+// Resumen de una lista de servicios (los mismos totales que el tablero de campaña de la planilla).
+// El cereal se separa por especie: sumar kilos de maíz con kilos de soja no tiene sentido.
+export function serviciosResumen(list) {
+  const r = { n: list.length, ha: 0, usd: 0, cereal: {}, sinTarifa: 0, conTarifa: 0, pendDato: 0 };
+  for (const s of list) {
+    r.ha += Number(s['Ha del servicio']) || 0;
+    if (servicioSinTarifa(s)) r.sinTarifa++; else r.conTarifa++;
+    if (s['Estado dato'] === 'Pendiente') r.pendDato++;
+    const i = ingresoServicio(s);
+    if (i.usd !== null) r.usd += i.usd;
+    if (i.kg !== null) { const c = i.cereal || 'Cereal'; r.cereal[c] = (r.cereal[c] || 0) + i.kg; }
+  }
+  return r;
+}
+
+// Cobros que la hoja de facturación tiene registrados para un servicio. "Confirmados" son los que cuenta el tablero.
+export function cobrosDeServicio(book, id) { return (book.fact || []).filter((f) => f['ID servicio'] === id); }
+export function cobrosConfirmados(list) {
+  const ok = list.filter((f) => f['Tipo movimiento'] === 'Cobro recibido' && f['Estado movimiento'] === 'Confirmado');
+  return { usd: sum(ok, (f) => f['Importe imputado USD']), kg: sum(ok, (f) => f['Cereal imputado kg']), n: ok.length };
+}
+
+// Producciones de un servicio de cosecha: las vinculadas a mano o, si no hay, las del mismo cliente, lote, cultivo y campaña.
+export function produccionesDeServicio(book, s) {
+  const ids = splitList(s['ID producción vinculada']);
+  const prods = book.prod || [];
+  const vinc = ids.map((id) => prods.find((p) => p['ID producción'] === id)).filter(Boolean);
+  if (vinc.length) return vinc;
+  if (s['Tipo servicio'] !== 'Cosecha' || isBlank(s['Cliente']) || isBlank(s['Campo / lote'])) return [];
+  return prods.filter((p) => norm(p['Campaña']) === norm(s['Campaña']) && norm(p['Cultivo']) === norm(s['Cultivo']) && norm(p['Campo / cliente']) === norm(s['Cliente']) && norm(p['Lote / condición']) === norm(s['Campo / lote']));
+}
+// Kilos de producción para un servicio "% producción" (0 si todavía no hay descargas).
+export function kgProduccionServicio(book, s) {
+  return Math.round(sum(produccionesDeServicio(book, s), (p) => prodView(p, book).kgFinal));
+}
+
+// Valor que va a la columna "Tarifa" según el tipo elegido en el formulario (el formulario tiene un campo por tipo).
+export function tarifaDeForm(v) {
+  return { 'USD/ha': v.tarUsdHa, '% producción': v.tarPct, 'Importe fijo': v.tarFijo }[v['Tipo tarifa']] ?? null;
+}
+
+const OBS_AUTO = /\s*Tarifa y entidad comercial pendientes de definir\./;
+const mismo = (a, b) => (isBlank(a) && isBlank(b)) || a === b;
+// Cambios que guarda el formulario de tarifa, solo en lo que difiere de lo ya cargado. `v` trae los valores del formulario.
+export function servicioTarifaSet(s, v) {
+  const tipo = v['Tipo tarifa'] || s['Tipo tarifa'] || 'Sin definir';
+  const nuevo = { 'Tipo tarifa': tipo, 'Entidad comercial informada': v['Entidad comercial informada'] || s['Entidad comercial informada'] || '' };
+  if (tipo === 'Sin definir') nuevo['Tarifa'] = null;
+  else {
+    nuevo['Tarifa'] = numOrNull(tarifaDeForm({ ...v, 'Tipo tarifa': tipo }));
+    nuevo['Moneda / cereal'] = tipo === 'USD/ha' ? 'USD' : (v['Moneda / cereal'] || '');
+    if (tipo === '% producción') {
+      nuevo['Producción base kg'] = numOrNull(v['Producción base kg']);
+      if (!isBlank(v['ID producción vinculada'])) nuevo['ID producción vinculada'] = v['ID producción vinculada'];
+    }
+  }
+  // El texto que deja la carga automática ("tarifa y entidad pendientes") sobra cuando ya están las dos cosas.
+  let obs = v['Observaciones'] ?? s['Observaciones'] ?? '';
+  if (obs === (s['Observaciones'] || '') && tipo !== 'Sin definir' && nuevo['Entidad comercial informada'] && nuevo['Entidad comercial informada'] !== 'Pendiente') obs = obs.replace(OBS_AUTO, '').trim();
+  nuevo['Observaciones'] = obs;
+  const set = {};
+  for (const [k, val] of Object.entries(nuevo)) if (!mismo(s[k], val)) set[k] = val === undefined ? '' : val;
+  return set;
+}

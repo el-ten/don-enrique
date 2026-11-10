@@ -2,7 +2,7 @@
 import { store } from './store.js';
 import { openForm, confirmDialog, toast } from './ui.js';
 import * as R from './rules.js';
-import { todayStr, nowTime, uid8, isBlank, splitList, joinList, unique, sortEs, fmtKg, fmtDate, norm } from './util.js';
+import { todayStr, nowTime, uid8, isBlank, splitList, joinList, unique, sortEs, fmtKg, fmtDate, fmt2, norm } from './util.js';
 import { emptyRow } from './model.js';
 import { TABLES } from './schema.js';
 
@@ -340,6 +340,78 @@ export function prodForm(book, prod = null) {
         await store.enqueue([{ t: 'append', tk: 'prod', rec: { ...emptyRow('prod'), 'ID producción': uid8(), ...compact(data) } }]);
       }
       toast('Producción guardada');
+    },
+  });
+}
+
+// ===================================================================== SERVICIOS (tarifa)
+// Carga o corrige la tarifa de un servicio. El ingreso lo calcula la planilla con sus fórmulas; la app muestra el mismo
+// resultado al instante (R.ingresoServicio).
+export function servicioForm(book, s) {
+  const live = () => store.book || book;
+  const esCosecha = s['Tipo servicio'] === 'Cosecha';
+  const kgSug = R.kgProduccionServicio(live(), s);
+  const prods = R.produccionesDeServicio(live(), s);
+  const tipoIs = (...t) => (v) => t.includes(v['Tipo tarifa']);
+  const tipo0 = isBlank(s['Tipo tarifa']) ? 'Sin definir' : s['Tipo tarifa'];
+  const v0 = {
+    'Tipo tarifa': tipo0, 'Moneda / cereal': s['Moneda / cereal'] || '', 'Producción base kg': s['Producción base kg'],
+    'ID producción vinculada': s['ID producción vinculada'] || '', 'Entidad comercial informada': s['Entidad comercial informada'] || 'Pendiente',
+    'Observaciones': s['Observaciones'] || '', tarUsdHa: null, tarPct: null, tarFijo: null,
+  };
+  const campo = { 'USD/ha': 'tarUsdHa', '% producción': 'tarPct', 'Importe fijo': 'tarFijo' }[tipo0];
+  if (campo) v0[campo] = s['Tarifa'];
+  // Un servicio de cosecha a porcentaje ya trae los kilos y la producción del lote si la app los encuentra.
+  if (tipo0 === '% producción' && esCosecha) {
+    if (isBlank(v0['Producción base kg']) && kgSug > 0) v0['Producción base kg'] = kgSug;
+    if (!v0['ID producción vinculada'] && prods.length === 1) v0['ID producción vinculada'] = prods[0]['ID producción'];
+  }
+  const prodOpts = () => {
+    const opts = prodOptions(live());
+    const cur = s['ID producción vinculada'];
+    return cur && !opts.some((o) => o.value === cur) ? [{ value: cur, label: cur }, ...opts] : opts; // varias producciones juntas ("A, B")
+  };
+  const merged = (v) => ({ ...s, 'Tipo tarifa': v['Tipo tarifa'], 'Tarifa': R.tarifaDeForm(v), 'Moneda / cereal': v['Tipo tarifa'] === 'USD/ha' ? 'USD' : v['Moneda / cereal'], 'Producción base kg': v['Producción base kg'] });
+  const ingresoTxt = (v) => { const i = R.ingresoServicio(merged(v)); return i.usd !== null ? `USD ${fmt2(i.usd)}` : i.kg !== null ? `${fmtKg(i.kg)} de ${String(i.cereal).toLowerCase()}` : ''; };
+  const lugar = [s['Cliente'], s['Campo / lote']].filter(Boolean).join(' — ');
+
+  return openForm({
+    title: 'Tarifa del servicio', submitLabel: 'Guardar tarifa',
+    subtitle: `${s['Tipo servicio']} · ${lugar || 'Sin cliente'}${isBlank(s['Ha del servicio']) ? '' : ` · ${fmt2(s['Ha del servicio'])} ha`}`,
+    fields: [
+      { name: 'Tipo tarifa', label: 'Cómo se cobra', type: 'chips', options: R.TIPOS_TARIFA, required: true, onChange: (v, set, nv) => {
+        if (nv === 'USD/ha') set('Moneda / cereal', 'USD');
+        else if (nv === '% producción') {
+          if (!R.CEREALES_SERVICIO.includes(v['Moneda / cereal'])) set('Moneda / cereal', R.CEREALES_SERVICIO.includes(s['Cultivo']) ? s['Cultivo'] : '');
+          if (esCosecha) {
+            if (isBlank(v['Producción base kg']) && kgSug > 0) set('Producción base kg', kgSug);
+            if (!v['ID producción vinculada'] && prods.length === 1) set('ID producción vinculada', prods[0]['ID producción']);
+          }
+        } else if (nv === 'Importe fijo' && isBlank(v['Moneda / cereal'])) set('Moneda / cereal', 'USD');
+      } },
+      { name: 'Moneda / cereal', label: 'Se cobra en', type: 'chips', options: (v) => (v['Tipo tarifa'] === '% producción' ? R.CEREALES_SERVICIO : R.MONEDAS_SERVICIO), show: tipoIs('% producción', 'Importe fijo'), required: true },
+      { name: 'tarUsdHa', label: 'Tarifa por hectárea', type: 'number', unit: 'USD/ha', show: tipoIs('USD/ha'), required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null) },
+      { name: 'tarPct', label: 'Porcentaje de la producción', type: 'number', unit: '%', show: tipoIs('% producción'), required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : x > 100 ? 'No puede pasar de 100' : null) },
+      { name: 'tarFijo', label: 'Importe total del servicio', type: 'number', show: tipoIs('Importe fijo'), required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null), hint: (v) => (v['Moneda / cereal'] === 'USD' ? 'En dólares, por todo el servicio.' : v['Moneda / cereal'] ? `En kilos de ${v['Moneda / cereal'].toLowerCase()}, por todo el servicio.` : 'Elegí primero en qué se cobra.') },
+      { name: 'Producción base kg', label: 'Kilos de producción', type: 'number', unit: 'kg', show: tipoIs('% producción'), hint: 'Sobre estos kilos se calcula el porcentaje. Sin este dato no se calcula el ingreso.', valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null) },
+      { name: 'ID producción vinculada', label: 'Producción de ese lote', type: 'ref', options: prodOpts, show: (v) => esCosecha && v['Tipo tarifa'] === '% producción', placeholder: 'Opcional', onChange: (v, set, nv) => {
+        const p = nv ? live().prod.find((x) => x['ID producción'] === nv) : null;
+        const kg = p ? Math.round(R.prodView(p, live()).kgFinal) : 0;
+        if (kg > 0) set('Producción base kg', kg);
+      }, hint: 'Al elegirla se completan los kilos con lo cosechado.' },
+      { type: 'note', tone: 'info', ic: 'coin', text: (v) => `Ingreso: ${ingresoTxt(v)}`, show: (v) => v['Tipo tarifa'] !== 'Sin definir' && !!ingresoTxt(v) },
+      { type: 'note', tone: 'warn', ic: 'alert', text: 'Falta el dato para calcular el ingreso.', show: (v) => v['Tipo tarifa'] !== 'Sin definir' && !isBlank(R.tarifaDeForm(v)) && !ingresoTxt(v) },
+      { type: 'section', label: 'Facturación' },
+      { name: 'Entidad comercial informada', label: 'Quién factura', type: 'chips', options: () => L(book, 'Entidad comercial') },
+      { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 3 },
+    ],
+    values: v0,
+    onSubmit: async (v) => {
+      const fresh = (live().serv || []).find((x) => x['ID servicio'] === s['ID servicio']) || s;
+      const set = R.servicioTarifaSet(fresh, v);
+      if (!Object.keys(set).length) { toast('No hubo cambios', 'info'); return; }
+      await store.enqueue([{ t: 'update', tk: 'serv', key: s['ID servicio'], set }]);
+      toast('Tarifa guardada');
     },
   });
 }

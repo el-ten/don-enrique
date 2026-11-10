@@ -54,10 +54,19 @@ export const TABLES = {
   // Servicios a terceros. La app carga una fila sola cuando termina una labor de servicio (ver servicioDeLabor en rules.js).
   // Las columnas W en adelante de esa hoja son tableros de control, no forman parte de la tabla.
   serv: {
-    sheet: '09_SERVICIOS', key: 'ID servicio', label: 'Servicios',
+    sheet: '09_SERVICIOS', key: 'ID servicio', label: 'Servicios', optional: true,
     headers: ['ID servicio', 'Campaña', 'Fecha inicio', 'Fecha fin', 'Cliente', 'Campo / lote', 'Cultivo', 'Tipo servicio', 'Ha del servicio', 'Tipo tarifa', 'Tarifa', 'Moneda / cereal', 'Producción base kg', 'Ingreso bruto USD', 'Ingreso bruto cereal kg', 'Entidad comercial informada', 'ID labor vinculada', 'ID producción vinculada', 'Estado servicio', 'Estado dato', 'Observaciones'],
     kinds: { 'Fecha inicio': 'date', 'Fecha fin': 'date', 'Ha del servicio': 'num', 'Tarifa': 'num', 'Producción base kg': 'num', 'Ingreso bruto USD': 'num', 'Ingreso bruto cereal kg': 'num' },
     formulaCols: ['Ingreso bruto USD', 'Ingreso bruto cereal kg'],
+  },
+  // Facturas y cobros de los servicios. Por ahora la app solo la LEE (muestra los cobros de cada servicio); se incluye
+  // ya en el script de Google para que se actualice una sola vez cuando se agregue la carga de facturas y cobros.
+  // Las columnas X en adelante son un tablero de control, no forman parte de la tabla.
+  fact: {
+    sheet: '10_FACTURACION_COBRANZAS', key: 'ID movimiento', label: 'Facturación y cobranzas', optional: true,
+    headers: ['ID movimiento', 'ID servicio', 'Campaña', 'Fecha', 'Cliente', 'Tipo movimiento', 'Documento / comprobante', 'N.º comprobante', 'Modalidad', 'Moneda / especie', 'Importe original ARS', 'Importe original USD', 'Cereal original kg', 'Tipo de cambio ARS/USD', 'Precio cereal aplicado USD/kg', 'Importe imputado USD', 'Cereal imputado kg', 'Entidad que facturó / cobró', 'Cuenta / destino', 'Estado movimiento', 'Estado dato', 'Observaciones'],
+    kinds: { 'Fecha': 'date', 'Importe original ARS': 'num', 'Importe original USD': 'num', 'Cereal original kg': 'num', 'Tipo de cambio ARS/USD': 'num', 'Precio cereal aplicado USD/kg': 'num', 'Importe imputado USD': 'num', 'Cereal imputado kg': 'num' },
+    formulaCols: [],
   },
 };
 

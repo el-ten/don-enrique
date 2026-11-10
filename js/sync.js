@@ -6,7 +6,7 @@ import { normalizeRead } from './model.js';
 let running = null;
 let timer = null;
 
-const firma = (snap) => (snap ? JSON.stringify([snap.tables, snap.cfg]) : '');
+const firma = (snap) => (snap ? JSON.stringify([snap.tables, snap.cfg, snap.avisos]) : '');
 function sameData(a, b) { return !!a && firma(a) === firma(b); }
 
 export function isSyncing() { return !!running; }
@@ -37,7 +37,7 @@ export function sync({ pull = true, quiet = false, minAge = 0 } = {}) {
       if (pull) {
         const raw = await api.read();
         const norm = normalizeRead(raw);
-        const snap = { at: new Date().toISOString(), tables: norm.tables, cfg: norm.cfg, serverTime: norm.serverTime };
+        const snap = { at: new Date().toISOString(), tables: norm.tables, cfg: norm.cfg, serverTime: norm.serverTime, avisos: norm.avisos };
         if (silent && sameData(store.snapshot, snap)) await store.touchSync(); // sin novedades: no se redibuja nada
         else await store.saveSnapshot(snap);
       }

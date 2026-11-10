@@ -10,7 +10,7 @@ let demo = null;
 async function demoServer() {
   if (!demo) {
     const saved = await store.getKV('mock:demo');
-    demo = createMock(saved || demoSeed());
+    demo = createMock(saved || demoSeed({ servicios: true }));
   }
   return demo;
 }

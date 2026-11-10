@@ -56,7 +56,7 @@ export function normalizeRead(payload) {
     if (raw) tables[tk] = normalizeTable(tk, raw);
   }
   const cfg = payload.config ? normalizeConfig(payload.config) : {};
-  return { tables, cfg, serverTime: payload.serverTime || null };
+  return { tables, cfg, serverTime: payload.serverTime || null, avisos: Array.isArray(payload.avisos) ? payload.avisos : [] };
 }
 
 // ---- cambios pendientes ----
@@ -108,7 +108,9 @@ export function buildBook(snapshot, ops) {
   // La hoja de servicios solo aparece si el script de Google ya la conoce (si es una versión vieja del script, la
   // lectura no la trae). Sin eso la app no genera servicios, para no mandarle cambios que no entiende.
   const hasServ = !!(snapshot && snapshot.tables && snapshot.tables.serv);
-  const book = { ...tables, tables, cfg, hasServ };
+  // Igual con la hoja de facturación y cobranzas: solo se muestran cobros si el script ya la lee.
+  const hasFact = !!(snapshot && snapshot.tables && snapshot.tables.fact);
+  const book = { ...tables, tables, cfg, hasServ, hasFact };
   return book;
 }
 

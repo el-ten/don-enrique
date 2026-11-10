@@ -8,12 +8,13 @@ import * as labores from './views/labores.js';
 import * as cosecha from './views/cosecha.js';
 import * as combustible from './views/combustible.js';
 import * as mas from './views/mas.js';
+import * as servicios from './views/servicios.js';
 import * as ajustes from './views/ajustes.js';
 import * as bienvenida from './views/bienvenida.js';
 
 const routes = {
   home, labores, cosecha, combustible, mas, ajustes,
-  silos: mas, produccion: mas, lotes: mas, equipos: mas,
+  silos: mas, produccion: mas, lotes: mas, equipos: mas, servicios,
 };
 const TAB_OF = { home: 'home', labores: 'labores', cosecha: 'cosecha', combustible: 'combustible' };
 const TABS = [
