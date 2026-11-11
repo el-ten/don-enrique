@@ -28,6 +28,7 @@ function menu({ go, book }) {
         tile('seedling', 'Producción', `${book.prod.length} ${book.prod.length === 1 ? 'registro' : 'registros'}`, 'produccion', 'green'),
         tile('map', 'Campos y lotes', `${book.lotes.length} lotes`, 'lotes', 'earth'),
         tile('coin', 'Servicios', book.hasServ ? servSub(book) : 'Tarifas y resumen', 'servicios', 'gold'),
+        tile('ticket', 'Facturas', book.hasDocs ? factSub(book) : 'Emitidas y recibidas', 'facturas', 'blue'),
         tile('tractor', 'Equipos', `${book.activos.length} equipos`, 'equipos', 'blue'),
         tile('gear', 'Ajustes', 'Conexión y sincronización', 'ajustes', 'slate'))),
   };
@@ -37,6 +38,12 @@ function menu({ go, book }) {
 function servSub(book) {
   const sin = book.serv.filter(R.servicioSinTarifa).length;
   return sin ? `${sin} sin tarifa` : `${book.serv.length} ${book.serv.length === 1 ? 'servicio' : 'servicios'}`;
+}
+
+// Texto del botón de Facturas: cuántas hay sin pagar o sin cobrar.
+function factSub(book) {
+  const sin = book.docs.filter((d) => !R.docPagado(d)).length;
+  return sin ? `${sin} ${sin === 1 ? 'pendiente' : 'pendientes'}` : `${book.docs.length} ${book.docs.length === 1 ? 'factura' : 'facturas'}`;
 }
 
 // ---------------------------------------------------------------- SILOS

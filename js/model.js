@@ -110,7 +110,9 @@ export function buildBook(snapshot, ops) {
   const hasServ = !!(snapshot && snapshot.tables && snapshot.tables.serv);
   // Igual con la hoja de facturación y cobranzas: solo se muestran cobros si el script ya la lee.
   const hasFact = !!(snapshot && snapshot.tables && snapshot.tables.fact);
-  const book = { ...tables, tables, cfg, hasServ, hasFact };
+  // Y la de facturas y comprobantes (hoja 19_DOCUMENTOS).
+  const hasDocs = !!(snapshot && snapshot.tables && snapshot.tables.docs);
+  const book = { ...tables, tables, cfg, hasServ, hasFact, hasDocs };
   return book;
 }
 

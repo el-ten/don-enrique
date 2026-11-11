@@ -78,6 +78,33 @@ export function createMock(initial) {
     return { ok: true, results, serverTime: new Date().toISOString() };
   }
 
+  // ---- archivos de las facturas (en la planilla real se guardan en una carpeta de Drive) ----
+  const MIMES_OK = ['application/pdf', 'image/jpeg', 'image/png'];
+  function filaDoc(docId) {
+    const T = TABLES.docs; const s = state.sheets[T.sheet];
+    const ki = s.headers.indexOf(T.key);
+    return { s, row: s.rows.find((r) => String(r[ki]) === String(docId)), iA: s.headers.indexOf('ID archivo'), iN: s.headers.indexOf('Archivo') };
+  }
+  function upload(b) {
+    const { row, iA, iN } = filaDoc(b.docId);
+    if (!row) return { ok: false, error: 'Todavía no existe el documento ' + b.docId, code: 'nodoc' };
+    if (row[iA] && !b.replace) return { ok: true, dup: true, fileId: row[iA] };
+    if (!MIMES_OK.includes(b.mime)) return { ok: false, error: 'Solo se pueden guardar PDF o fotos (JPG o PNG)', code: 'server' };
+    if (!b.data) return { ok: false, error: 'El archivo está vacío', code: 'server' };
+    const fileId = `demo-file-${b.docId}`;
+    state.files = state.files || {};
+    state.files[fileId] = { name: b.name, mime: b.mime, data: b.data };
+    row[iA] = fileId; row[iN] = b.name;
+    return { ok: true, fileId };
+  }
+  function getfile(b) {
+    const { row, iA } = filaDoc(b.docId);
+    if (!row) return { ok: false, error: 'No existe el documento ' + b.docId, code: 'nodoc' };
+    const f = row[iA] && state.files && state.files[row[iA]];
+    if (!f) return { ok: false, error: 'Ese documento no tiene archivo guardado', code: 'nofile' };
+    return { ok: true, name: f.name, mime: f.mime, data: f.data };
+  }
+
   return { state, read, write, handle: (body) => handle(body) };
 
   function handle(body) {
@@ -85,6 +112,8 @@ export function createMock(initial) {
     if (body.action === 'ping') return { ok: true, pong: true, serverTime: new Date().toISOString() };
     if (body.action === 'read') return read();
     if (body.action === 'write') return write(body.ops || []);
+    if (body.action === 'upload') return upload(body);
+    if (body.action === 'getfile') return getfile(body);
     return { ok: false, error: 'Acción desconocida' };
   }
 }
@@ -113,7 +142,7 @@ const dayOffset = (n) => { const d = new Date(); d.setDate(d.getDate() + n); ret
 
 // Datos de ejemplo 100 % ficticios (para probar la app sin tocar la planilla real).
 // servicios = true agrega servicios y un cobro de ejemplo (lo usa el modo demo de la app); las pruebas parten sin ellos.
-export function demoSeed({ servicios = false } = {}) {
+export function demoSeed({ servicios = false, facturas = false } = {}) {
   const st = emptyState();
   st.config = configFromLists({
     ...DEFAULT_LISTS,
@@ -165,6 +194,12 @@ export function demoSeed({ servicios = false } = {}) {
     put(st, 'serv', { 'ID servicio': 'SER-DEMO-003', 'Campaña': '2026/27', 'Fecha inicio': dayOffset(-2), 'Fecha fin': dayOffset(-2), 'Cliente': 'Los Ceibos', 'Campo / lote': 'Fondo', 'Cultivo': 'Soja', 'Tipo servicio': 'Pulverización', 'Ha del servicio': 30, 'Tipo tarifa': 'Sin definir', 'Entidad comercial informada': 'Pendiente', 'Estado servicio': 'Terminado', 'Estado dato': 'Confirmado', 'Observaciones': 'Cargado automáticamente al terminar la labor. Tarifa y entidad comercial pendientes de definir.' });
     put(st, 'serv', { 'ID servicio': 'SER-DEMO-004', 'Campaña': '2025/26', 'Fecha inicio': dayOffset(-200), 'Fecha fin': dayOffset(-200), 'Cliente': 'Santa Rita', 'Campo / lote': 'Lote sur', 'Cultivo': 'Soja', 'Tipo servicio': 'Fertilización', 'Ha del servicio': 25, 'Tipo tarifa': 'Importe fijo', 'Tarifa': 1500, 'Moneda / cereal': 'USD', 'Entidad comercial informada': 'SH', 'Estado servicio': 'Terminado', 'Estado dato': 'Confirmado' });
     put(st, 'fact', { 'ID movimiento': 'FC-DEMO-001', 'ID servicio': 'SER-DEMO-001', 'Campaña': '2026/27', 'Cliente': 'Los Ceibos', 'Tipo movimiento': 'Cobro recibido', 'Modalidad': 'Pendiente de definir', 'Importe imputado USD': 2600, 'Entidad que facturó / cobró': 'SH', 'Estado movimiento': 'Confirmado', 'Estado dato': 'Pendiente', 'Observaciones': 'Cobro confirmado; faltan fecha y comprobante.' });
+  }
+  if (facturas) {
+    // facturas de ejemplo (proveedores, clientes y CUIT inventados) para ver cómo se ve la sección Facturas
+    put(st, 'docs', { 'ID documento': 'DOC-2627-R-001', 'Campaña': '2026/27', 'Sentido': 'Recibida', 'Fecha': dayOffset(-18), 'Tipo comprobante': 'Factura A', 'Punto de venta': '00003', 'N.º comprobante': '00004512', 'Contraparte': 'Agroinsumos del Sur SA', 'CUIT contraparte': '30-71234567-1', 'Descripción': 'Semilla de maíz y fertilizante', 'Neto gravado': 1850000, 'IVA': 388500, 'Otros impuestos': 0, 'Total': 2238500, 'Moneda': 'ARS', 'Vencimiento': dayOffset(12), 'Estado de pago': 'Pendiente', 'Unidad imputada': 'CP-SH', 'Estado dato': 'Confirmado' });
+    put(st, 'docs', { 'ID documento': 'DOC-2627-R-002', 'Campaña': '2026/27', 'Sentido': 'Recibida', 'Fecha': dayOffset(-20), 'Tipo comprobante': 'Factura A', 'Punto de venta': '00012', 'N.º comprobante': '00088210', 'Contraparte': 'Estación de servicio Ruta 8', 'CUIT contraparte': '20-12345678-6', 'Descripción': 'Gasoil, 3.000 litros', 'Neto gravado': 3305785.12, 'IVA': 694214.88, 'Otros impuestos': 0, 'Total': 4000000, 'Moneda': 'ARS', 'Estado de pago': 'Pagada', 'Fecha de pago': dayOffset(-19), 'Unidad imputada': 'SH general', 'Estado dato': 'Confirmado' });
+    put(st, 'docs', { 'ID documento': 'DOC-2627-E-001', 'Campaña': '2026/27', 'Sentido': 'Emitida', 'Fecha': dayOffset(-5), 'Tipo comprobante': 'Factura A', 'Punto de venta': '00002', 'N.º comprobante': '00000137', 'Contraparte': 'Los Ceibos', 'CUIT contraparte': '30-99999999-5', 'Descripción': 'Servicio de siembra, 40 ha', 'Neto gravado': 2600, 'IVA': 273, 'Otros impuestos': 0, 'Total': 2873, 'Moneda': 'USD', 'Vencimiento': dayOffset(25), 'Estado de pago': 'Pendiente', 'Unidad imputada': 'SER', 'ID servicio vinculado': 'SER-DEMO-001', 'Estado dato': 'Confirmado' });
   }
   // silos
   put(st, 'silos', { 'ID silo': 'SILO-01', 'Nombre silo': 'Silo 1', 'Tipo': 'Silo de chapa', 'Capacidad kg': 60000, 'Estado': 'Activo', 'Estado dato': 'Confirmado' });

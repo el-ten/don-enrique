@@ -516,6 +516,121 @@ export function nuevoId(book, tk, d = {}) {
     case 'comb': return siguienteId(b.comb, 'ID movimiento combustible', `COMB-${camp}-`, 3);
     case 'silos': return siguienteId(b.silos, 'ID silo', 'SILO-', 2);
     case 'lotes': return siguienteId(b.lotes, 'ID lote', `${prefijoLote(b, d)}-`, 2);
+    case 'docs': return siguienteId(b.docs, 'ID documento', `DOC-${camp}-${d['Sentido'] === 'Emitida' ? 'E' : 'R'}-`, 3);
     default: return uid8();
   }
+}
+
+// ------------------------------------------------------------------ FACTURAS Y COMPROBANTES (hoja 19_DOCUMENTOS)
+export const SENTIDOS = ['Recibida', 'Emitida'];
+export const ESTADOS_PAGO = ['Pendiente', 'Pagada'];
+export const TIPOS_COMPROBANTE = ['Factura A', 'Factura B', 'Factura C', 'Factura M', 'Nota de crédito', 'Nota de débito', 'Recibo', 'Ticket', 'Remito', 'Otro'];
+export const MONEDAS_DOC = ['ARS', 'USD'];
+export const ALICUOTAS_IVA = [{ value: '21', label: '21 %' }, { value: '10.5', label: '10,5 %' }, { value: '27', label: '27 %' }, { value: '0', label: 'Sin IVA' }];
+
+const r2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+const soloDigitos = (s) => String(s ?? '').replace(/\D/g, '');
+
+// CUIT / CUIL: 11 dígitos, el último es un dígito verificador (módulo 11).
+export function cuitValido(c) {
+  const d = soloDigitos(c);
+  if (d.length !== 11) return false;
+  const pesos = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+  const suma = pesos.reduce((a, p, i) => a + p * Number(d[i]), 0);
+  let v = 11 - (suma % 11);
+  if (v === 11) v = 0;
+  if (v === 10) return false;
+  return v === Number(d[10]);
+}
+// "20123456786" → "20-12345678-6" (si no tiene 11 dígitos se devuelve como lo escribieron)
+export function formatCuit(c) {
+  const d = soloDigitos(c);
+  return d.length === 11 ? `${d.slice(0, 2)}-${d.slice(2, 10)}-${d.slice(10)}` : String(c ?? '').trim();
+}
+// Punto de venta (5 dígitos) y número (8 dígitos) con ceros a la izquierda, como en la factura.
+export const formatPV = (x) => { const d = soloDigitos(x); return d ? d.padStart(5, '0').slice(-5) : ''; };
+export const formatNroComp = (x) => { const d = soloDigitos(x); return d ? d.padStart(8, '0').slice(-8) : ''; };
+export function comprobanteTexto(d) {
+  const pv = d['Punto de venta'], n = d['N.º comprobante'];
+  if (isBlank(pv) && isBlank(n)) return '';
+  return [pv ? formatPV(pv) : '', n ? formatNroComp(n) : ''].filter(Boolean).join('-');
+}
+
+// Las notas de crédito restan en los totales.
+export const docSigno = (d) => (String(d['Tipo comprobante'] || '').startsWith('Nota de crédito') ? -1 : 1);
+export const docMoneda = (d) => (d['Moneda'] === 'USD' ? 'USD' : 'ARS');
+export const docPagado = (d) => d['Estado de pago'] === 'Pagada';
+// "Pagada" si es una factura que recibí (la pago yo) y "Cobrada" si la emití (me la pagan a mí).
+export const docEstadoTexto = (d) => (docPagado(d) ? (d['Sentido'] === 'Emitida' ? 'Cobrada' : 'Pagada') : 'Pendiente');
+export function docVencida(d, hoy = todayStr()) { return !docPagado(d) && !isBlank(d['Vencimiento']) && d['Vencimiento'] < hoy; }
+export const docTitulo = (d) => d['Contraparte'] || 'Sin nombre';
+
+// ¿Neto + IVA + otros impuestos da el total? (con un margen de centavos por redondeos). null si faltan datos para comparar.
+export function importesCierran({ neto, iva, otros, total }) {
+  if (isBlank(total) || (isBlank(neto) && isBlank(iva))) return null;
+  const sumaTodo = (Number(neto) || 0) + (Number(iva) || 0) + (Number(otros) || 0);
+  return Math.abs(sumaTodo - Number(total)) <= 0.05;
+}
+// Con el total y la alícuota se sacan el neto y el IVA; con el neto y la alícuota, el IVA y el total.
+export function calcularIva({ total, neto, otros, alicuota }, desde) {
+  const a = Number(alicuota);
+  if (!Number.isFinite(a) || isBlank(alicuota)) return null;
+  const ot = Number(otros) || 0;
+  if (desde === 'neto') {
+    if (isBlank(neto)) return null;
+    const iva = r2(Number(neto) * a / 100);
+    return { iva, total: r2(Number(neto) + iva + ot) };
+  }
+  if (isBlank(total)) return null;
+  const base = Number(total) - ot;
+  const n = r2(base / (1 + a / 100));
+  return { neto: n, iva: r2(base - n) };
+}
+
+// ¿Ya cargué esta factura? Mismo sentido, tipo, punto de venta y número del mismo CUIT; si no hay número, misma persona, total y fecha.
+export function docDuplicado(book, d, idPropio = '') {
+  const otros = (book.docs || []).filter((x) => x['ID documento'] !== idPropio && x['Sentido'] === d['Sentido']);
+  const nro = comprobanteTexto(d), cuit = soloDigitos(d['CUIT contraparte']);
+  if (nro && (cuit || !isBlank(d['Contraparte']))) {
+    const m = otros.find((x) => comprobanteTexto(x) === nro && (x['Tipo comprobante'] || '') === (d['Tipo comprobante'] || '')
+      && (cuit ? soloDigitos(x['CUIT contraparte']) === cuit : norm(x['Contraparte']) === norm(d['Contraparte'])));
+    if (m) return m;
+  }
+  if (!nro && !isBlank(d['Total']) && !isBlank(d['Fecha']) && !isBlank(d['Contraparte'])) {
+    return otros.find((x) => isBlank(comprobanteTexto(x)) && norm(x['Contraparte']) === norm(d['Contraparte']) && Number(x['Total']) === Number(d['Total']) && x['Fecha'] === d['Fecha']) || null;
+  }
+  return null;
+}
+
+// Filtro de la lista: campaña, sentido, estado de pago y texto libre.
+export function docsFiltrados(book, { camp = '', sentido = '', pago = '', q = '' } = {}) {
+  const t = norm(q);
+  return (book.docs || [])
+    .filter((d) => (!camp || d['Campaña'] === camp) && (!sentido || d['Sentido'] === sentido))
+    .filter((d) => (pago === 'pendientes' ? !docPagado(d) : pago === 'pagadas' ? docPagado(d) : true))
+    .filter((d) => !t || norm([d['Contraparte'], d['CUIT contraparte'], d['Descripción'], comprobanteTexto(d), d['Tipo comprobante'], d['ID documento'], d['Observaciones'], d['Unidad imputada']].join(' ')).includes(t))
+    .sort((a, b) => (b['Fecha'] || '').localeCompare(a['Fecha'] || '') || String(b['ID documento']).localeCompare(String(a['ID documento'])));
+}
+
+// Totales por moneda: lo que hay para pagar (recibidas pendientes), para cobrar (emitidas pendientes) y lo facturado.
+export function docsResumen(list) {
+  const out = { ARS: { pagar: 0, cobrar: 0, recibido: 0, emitido: 0 }, USD: { pagar: 0, cobrar: 0, recibido: 0, emitido: 0 }, n: list.length, vencidas: 0 };
+  for (const d of list) {
+    const t = (Number(d['Total']) || 0) * docSigno(d);
+    const m = out[docMoneda(d)];
+    if (d['Sentido'] === 'Emitida') { m.emitido += t; if (!docPagado(d)) m.cobrar += t; } else { m.recibido += t; if (!docPagado(d)) m.pagar += t; }
+    if (docVencida(d)) out.vencidas++;
+  }
+  return out;
+}
+export const fmtMonto = (n, moneda = 'ARS') => {
+  if (isBlank(n)) return '—';
+  const t = new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+  return moneda === 'USD' ? `USD ${t}` : `$ ${t}`;
+};
+
+// Nombre del archivo que se guarda en Drive y se descarga: "DOC-2627-R-001 Proveedor.pdf"
+export function nombreArchivoDoc(d, ext) {
+  const base = `${d['ID documento']}${d['Contraparte'] ? ' ' + d['Contraparte'] : ''}`.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
+  return `${base}.${ext}`;
 }

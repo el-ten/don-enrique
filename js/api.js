@@ -10,7 +10,7 @@ let demo = null;
 async function demoServer() {
   if (!demo) {
     const saved = await store.getKV('mock:demo');
-    demo = createMock(saved || demoSeed({ servicios: true }));
+    demo = createMock(saved || demoSeed({ servicios: true, facturas: true }));
   }
   return demo;
 }
@@ -23,8 +23,9 @@ async function call(body, timeoutMs = 25000, override = null) {
   if (cfg.mode === 'demo') {
     const m = await demoServer();
     const out = m.handle(JSON.parse(JSON.stringify(body)));
-    if (body.action === 'write') await store.setKV('mock:demo', m.state);
+    if (body.action === 'write' || body.action === 'upload') await store.setKV('mock:demo', m.state);
     await wait(120);
+    if (out && out.ok === false) throw new ServerError(out.error || 'Error del servidor', out.code || 'server'); // igual que con la planilla real
     return out;
   }
   if (!cfg.url) throw new ServerError('Falta la dirección de conexión', 'config');
@@ -58,8 +59,28 @@ export function toWireOp(op) {
   return o;
 }
 
+// base64 de un ArrayBuffer (por tramos, para no reventar la pila con archivos grandes)
+export function bufToBase64(buf) {
+  const u8 = new Uint8Array(buf);
+  let s = '';
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+export function base64ToBuf(b64) {
+  const s = atob(b64);
+  const u8 = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i);
+  return u8.buffer;
+}
+
 export const api = {
   ping: (override) => call({ action: 'ping' }, 12000, override),
   read: () => call({ action: 'read' }, 40000),
   write: (ops) => call({ action: 'write', ops: ops.map(toWireOp) }, 45000),
+  // Los archivos de las facturas van aparte de los cambios de la planilla: pesan más y no tienen que frenar a los demás.
+  upload: (f) => call({ action: 'upload', docId: f.docId, name: f.name, mime: f.mime, replace: !!f.replace, data: bufToBase64(f.buf) }, 120000),
+  getFile: async (docId) => {
+    const r = await call({ action: 'getfile', docId }, 120000);
+    return { name: r.name, mime: r.mime, buf: base64ToBuf(r.data) };
+  },
 };

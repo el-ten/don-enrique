@@ -316,6 +316,8 @@ body.sheet-full-open #edge-band { background-color: var(--surface); }
 /* estadísticas */
 .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .stats.three { grid-template-columns: repeat(3, 1fr); }
+.stats.money .stat:first-child { grid-column: 1 / -1; }
+.stats.money .stat:first-child b { font-size: 1.35rem; }
 .stat { display: flex; flex-direction: column; gap: 4px; padding: 12px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--line); }
 .stat span { font-size: .74rem; color: var(--muted); font-weight: 600; }
 .stat b { font: 700 1.1rem/1.15 var(--round); overflow-wrap: anywhere; }
@@ -364,6 +366,9 @@ body.sheet-full-open #edge-band { background-color: var(--surface); }
 .searchbox .input.search:focus { outline: none; box-shadow: none; }
 .filters { display: flex; gap: 8px; overflow-x: auto; margin: 0 calc(-1 * (var(--sar) + 16px)) 0 calc(-1 * (var(--sal) + 16px)); padding: 2px calc(var(--sar) + 16px) 4px calc(var(--sal) + 16px); scrollbar-width: none; }
 .filters::-webkit-scrollbar { display: none; }
+.filters.fit { overflow: visible; }
+.filters.fit .filter { flex: 1 1 0; min-width: 0; }
+.filters.fit .filter .input.select.sm { flex: 1; min-width: 0; width: 100%; text-overflow: ellipsis; }
 .filter { flex: none; display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 4px 0 16px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-weight: 600; font-size: .85rem; color: var(--muted); }
 .filter .input.select.sm { width: auto; min-height: 40px; border: 0; background-color: transparent; padding: 0 28px 0 2px; font-weight: 650; color: var(--ink);
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2376826f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>"); background-repeat: no-repeat; background-position: right 6px center; }
@@ -512,3 +517,14 @@ textarea.input { padding: 12px 14px; min-height: 80px; resize: vertical; line-he
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ----- facturas: archivo adjunto y visor ----- */
+.file-field { display: flex; flex-direction: column; gap: 10px; }
+.file-card { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--line); }
+.file-card .grow { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.file-card b { overflow-wrap: anywhere; font-size: .95rem; }
+.file-card small { color: var(--muted); font-size: .8rem; }
+.file-thumb { flex: none; width: 64px; height: 64px; border-radius: 12px; object-fit: cover; background: var(--bg-2); border: 1px solid var(--line); }
+.file-thumb.ic-box { display: inline-flex; align-items: center; justify-content: center; color: var(--green); }
+.viewer { display: flex; justify-content: center; align-items: flex-start; padding: 4px 0 12px; touch-action: pinch-zoom pan-x pan-y; }
+.viewer img { max-width: 100%; height: auto; border-radius: 10px; box-shadow: var(--shadow); background: #fff; }

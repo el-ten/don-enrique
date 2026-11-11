@@ -3,16 +3,18 @@ import { buildBook } from './model.js';
 import { uid8 } from './util.js';
 
 let db = null;
-const mem = { kv: new Map(), outbox: new Map() }; // respaldo si IndexedDB no está disponible
+const mem = { kv: new Map(), outbox: new Map(), files: new Map() }; // respaldo si IndexedDB no está disponible
 
 function openDB() {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === 'undefined') return reject(new Error('sin IndexedDB'));
-    const r = indexedDB.open('de-main', 1);
+    const r = indexedDB.open('de-main', 2);
     r.onupgradeneeded = () => {
       const d = r.result;
       if (!d.objectStoreNames.contains('kv')) d.createObjectStore('kv');
       if (!d.objectStoreNames.contains('outbox')) d.createObjectStore('outbox', { keyPath: 'id' });
+      // archivos de las facturas (foto o PDF): se guardan en el celular hasta que suben a Drive y quedan como copia para verlos sin señal
+      if (!d.objectStoreNames.contains('files')) d.createObjectStore('files', { keyPath: 'key' });
     };
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
@@ -48,6 +50,23 @@ async function outboxPut(op) {
 async function outboxDelete(id) {
   if (!db) { mem.outbox.delete(id); return; }
   await tx('outbox', 'readwrite', (s) => s.delete(id));
+}
+
+async function fileAll() {
+  if (!db) return [...mem.files.values()];
+  return new Promise((res, rej) => { const q = db.transaction('files').objectStore('files').getAll(); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+}
+async function filePut(rec) {
+  if (!db) { mem.files.set(rec.key, rec); return; }
+  await tx('files', 'readwrite', (s) => s.put(rec));
+}
+async function fileGet(key) {
+  if (!db) return mem.files.get(key);
+  return new Promise((res, rej) => { const q = db.transaction('files').objectStore('files').get(key); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+}
+async function fileDelete(key) {
+  if (!db) { mem.files.delete(key); return; }
+  await tx('files', 'readwrite', (s) => s.delete(key));
 }
 
 let seq = 0;
@@ -134,8 +153,22 @@ export const store = {
     this.rebuild();
   },
   async discard(id) {
+    const op = this.ops.find((o) => o.id === id);
     await this.removeOps([id]);
+    // si era el alta de una factura que no llegó a subirse, su archivo tampoco hace falta
+    if (op && op.tk === 'docs' && op.t === 'append' && op.rec) await this.removeFile(op.rec['ID documento']);
     this.rebuild();
+  },
+
+  // ---- archivos de las facturas ----
+  // rec: { docId, name, mime, size, buf (ArrayBuffer), w?, h?, uploaded, replace? } — se guarda por modalidad (demo / real).
+  async putFile(rec) { await filePut({ ...rec, key: `${this.config.mode}:${rec.docId}`, mode: this.config.mode }); },
+  async getFile(docId) { return (await fileGet(`${this.config.mode}:${docId}`)) || null; },
+  async removeFile(docId) { await fileDelete(`${this.config.mode}:${docId}`); },
+  async pendingFiles() { return (await fileAll()).filter((f) => f.mode === this.config.mode && !f.uploaded); },
+  async markFileUploaded(docId) {
+    const f = await this.getFile(docId);
+    if (f) await filePut({ ...f, uploaded: true, replace: false });
   },
 
   pending() { return this.ops.filter((o) => !o.failed).length; },

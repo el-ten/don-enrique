@@ -1,6 +1,7 @@
 // Piezas de interfaz: elementos, avisos, hojas inferiores, selector y motor de formularios.
 import { icon } from './icons.js';
 import { isBlank, parseInputNumber, formatInputNumber, fmtDate } from './util.js';
+import { elegirArchivo, mb } from './files.js';
 
 export function h(tag, props, ...children) {
   const el = document.createElement(tag);
@@ -126,6 +127,7 @@ export function pickOne({ title, options, value, allowClear = false, searchable 
 export function openForm({ title, subtitle, fields, values = {}, submitLabel = 'Guardar', onSubmit, tone = 'primary', onClose }) {
   const v = { ...values };
   const errors = {};
+  const urls = new Set(); // vistas previas de archivos: se liberan al cerrar el formulario
   const form = h('form', { class: 'form', novalidate: true, autocomplete: 'off' });
   let sheet;
   const setValue = (k, val) => { v[k] = val; };
@@ -159,6 +161,7 @@ export function openForm({ title, subtitle, fields, values = {}, submitLabel = '
       v[f.name] = nv;
       delete errors[f.name];
       if (f.onChange) f.onChange(v, setValue, nv);
+      if (!rerender && v[f.name] !== nv) rerender = true; // onChange reacomodó el valor (CUIT con guiones, ceros del número): se redibuja para que se vea
       if (rerender) (deferred ? redrawLater() : redraw());
     };
     switch (f.type) {
@@ -221,6 +224,32 @@ export function openForm({ title, subtitle, fields, values = {}, submitLabel = '
           const r = await pickOne({ title: f.label, options: opts, value: val, allowClear: !req, empty: f.empty, add: f.add });
           if (r !== undefined) change(r);
         } }, h('span', { class: 'ref-text' }, cur ? h('b', null, cur.label) : (f.placeholder || 'Elegir…'), cur && cur.sub ? h('small', null, cur.sub) : null), icon('right', 18));
+        break;
+      }
+      case 'file': {
+        // Foto o PDF de la factura. val = { kind:'image'|'pdf', name, size, buf, mime } (archivo nuevo) | { existing:true, kind, name } (ya guardado) | null.
+        const pick = async (camara) => {
+          try {
+            const a = await elegirArchivo({ camara });
+            if (a) change(a);
+          } catch (e) { toast(String(e.message || e), 'warn', 5000); }
+        };
+        if (!val) {
+          control = h('div', { class: 'file-field' },
+            h('div', { class: 'btn-row' },
+              button({ label: 'Sacar foto', ic: 'camera', tone: 'soft', onClick: () => pick(true) }),
+              button({ label: 'Elegir foto o PDF', ic: 'file', tone: 'ghost', onClick: () => pick(false) })));
+        } else {
+          let thumb;
+          if (val.kind === 'image' && val.buf) { val._url ||= URL.createObjectURL(new Blob([val.buf], { type: val.mime })); urls.add(val._url); thumb = h('img', { class: 'file-thumb', src: val._url, alt: 'Vista previa de la factura' }); }
+          else thumb = h('span', { class: 'file-thumb ic-box' }, icon(val.kind === 'pdf' ? 'file' : 'image', 26));
+          control = h('div', { class: 'file-field' },
+            h('div', { class: 'file-card' }, thumb,
+              h('div', { class: 'grow' }, h('b', null, val.name || 'Archivo'), h('small', null, val.existing ? (val.pending ? 'Todavía sin subir a Drive' : 'Guardado en Drive') : [val.kind === 'pdf' ? 'PDF' : 'Foto', val.size ? mb(val.size) : ''].filter(Boolean).join(' · ')))),
+            h('div', { class: 'btn-row' },
+              button({ label: val.existing ? 'Reemplazar' : 'Cambiar', ic: 'camera', tone: 'soft', size: 'sm', onClick: () => pick(false) }),
+              val.existing ? null : button({ label: 'Quitar', ic: 'trash', tone: 'ghost', size: 'sm', onClick: () => change(null) })));
+        }
         break;
       }
       case 'readonly':
@@ -324,7 +353,7 @@ export function openForm({ title, subtitle, fields, values = {}, submitLabel = '
   const submitBtn = button({ label: submitLabel, tone, size: 'lg', block: true, onClick: submit });
   // aplicar valores por defecto dependientes
   for (const f of fields) if (f.onChange && f.runOnOpen) f.onChange(v, setValue, v[f.name]);
-  sheet = openSheet({ title, full: true, body: form, footer: submitBtn, onClose });
+  sheet = openSheet({ title, full: true, body: form, footer: submitBtn, onClose: (r) => { urls.forEach((u) => URL.revokeObjectURL(u)); if (onClose) onClose(r); } });
   redraw();
   setTimeout(() => { const sb = sheet.body; if (sb) sb.scrollTop = 0; }, 0);
   return sheet;

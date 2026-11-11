@@ -2,7 +2,7 @@
 import { store } from './store.js';
 import { openForm, confirmDialog, toast } from './ui.js';
 import * as R from './rules.js';
-import { todayStr, nowTime, isBlank, splitList, joinList, unique, sortEs, fmtKg, fmtDate, fmt2, norm } from './util.js';
+import { todayStr, nowTime, isBlank, splitList, joinList, unique, sortEs, fmtKg, fmtDate, fmt2, norm, campaignFor } from './util.js';
 import { emptyRow } from './model.js';
 import { TABLES } from './schema.js';
 
@@ -542,6 +542,125 @@ export function activoForm(book, a) {
     },
   });
 }
+
+// ===================================================================== FACTURAS Y COMPROBANTES
+// Alta o edición de una factura (emitida o recibida). El archivo (foto o PDF) se guarda primero en el celular y se sube a Drive
+// en la sincronización (ver sync.js); en la planilla queda la fila con su nombre.
+// opciones: archivo = foto o PDF ya elegido (viene de la pantalla "Cargar factura"); onCreated(id) = qué hacer al guardar una nueva.
+export function facturaForm(book, doc = null, { archivo = null, sentido = '', onCreated = null } = {}) {
+  const live = () => store.book || book;
+  const nuevo = !doc;
+  let campManual = false;
+  const extDe = (a) => (a.mime === 'application/pdf' ? 'pdf' : 'jpg');
+  const contrapartes = (v) => {
+    const sent = v['Sentido'] === 'Emitida' ? 'Emitida' : 'Recibida';
+    const delSentido = [...(live().docs || [])].filter((d) => d['Sentido'] === sent).sort((a, b) => (b['Fecha'] || '').localeCompare(a['Fecha'] || '')).map((d) => d['Contraparte']);
+    const clientes = sent === 'Emitida' ? (live().serv || []).map((x) => x['Cliente']) : [];
+    return unique([...delSentido, ...clientes].filter(Boolean)).slice(0, 6);
+  };
+  const v0 = nuevo
+    ? { 'Sentido': sentido || 'Recibida', 'Fecha': todayStr(), 'Campaña': campaignFor(todayStr()), 'Moneda': 'ARS', 'Estado de pago': 'Pendiente', 'Estado dato': 'Confirmado', 'Archivo': archivo || null, alicuota: '' }
+    : { ...doc, 'Moneda': doc['Moneda'] || 'ARS', 'Estado de pago': doc['Estado de pago'] || 'Pendiente', 'Archivo': tieneArchivoDoc(doc) ? { existing: true, pending: isBlank(doc['ID archivo']), kind: /\.pdf$/i.test(doc['Archivo'] || '') ? 'pdf' : 'image', name: doc['Archivo'] || 'Archivo' } : null, alicuota: '' };
+  const imp = (v) => ({ neto: v['Neto gravado'], iva: v['IVA'], otros: v['Otros impuestos'], total: v['Total'] });
+  const suma = (v) => (Number(v['Neto gravado']) || 0) + (Number(v['IVA']) || 0) + (Number(v['Otros impuestos']) || 0);
+  const ivaDesdeTotal = (v, set) => { const r = R.calcularIva({ total: v['Total'], otros: v['Otros impuestos'], alicuota: v.alicuota }, 'total'); if (r) { set('Neto gravado', r.neto); set('IVA', r.iva); } };
+  const mon = (v) => (v['Moneda'] === 'USD' ? 'USD' : 'ARS');
+  const servOpts = () => (live().serv || []).map((x) => ({ value: x['ID servicio'], label: `${x['Tipo servicio'] || 'Servicio'} · ${x['Cliente'] || 'Sin cliente'}`, sub: `${x['Campo / lote'] || ''}${x['Campo / lote'] ? ' · ' : ''}${x['ID servicio']}` }));
+
+  return openForm({
+    title: nuevo ? 'Cargar factura' : 'Editar factura', submitLabel: nuevo ? 'Guardar factura' : 'Guardar cambios',
+    fields: [
+      { name: 'Archivo', label: 'Foto o PDF de la factura', type: 'file', hint: 'Se guarda en tu Drive y la podés volver a bajar cuando quieras. Es opcional.' },
+      { name: 'Sentido', label: 'Tipo', type: 'chips', options: [{ value: 'Recibida', label: 'Recibida (compra)' }, { value: 'Emitida', label: 'Emitida (venta)' }], required: true, hint: (v) => (v['Sentido'] === 'Emitida' ? 'Una factura que hiciste vos a un cliente.' : 'Una factura que te hizo un proveedor.') },
+      { name: 'Contraparte', label: 'Proveedor', type: 'text', required: true, show: (v) => v['Sentido'] !== 'Emitida', suggest: contrapartes, onChange: (v, set, nv) => autoCuit(v, set, nv) },
+      { name: 'Contraparte', label: 'Cliente', type: 'text', required: true, show: (v) => v['Sentido'] === 'Emitida', suggest: contrapartes, onChange: (v, set, nv) => autoCuit(v, set, nv) },
+      { name: 'CUIT contraparte', label: 'CUIT', type: 'text', placeholder: '30-12345678-9', hint: 'Opcional. Se acomoda solo con los guiones.', valid: (v, x) => (R.cuitValido(x) ? null : 'El CUIT no es válido: revisá los 11 números'), onChange: (v, set, nv) => { if (R.cuitValido(nv)) set('CUIT contraparte', R.formatCuit(nv)); } },
+      { name: 'Tipo comprobante', label: 'Tipo de comprobante', type: 'select', options: R.TIPOS_COMPROBANTE, placeholder: 'Elegir…' },
+      { name: 'Fecha', label: 'Fecha de la factura', type: 'date', required: true, onChange: (v, set, nv) => { if (!campManual && nv) set('Campaña', campaignFor(nv)); } },
+      { name: 'Punto de venta', label: 'Punto de venta', type: 'text', placeholder: '0003', maxlength: 8, hint: 'Los primeros números del comprobante (ej. 0003-00001234).', valid: (v, x) => (/^\d{1,5}$/.test(String(x).trim()) ? null : 'Solo números'), onChange: (v, set, nv) => { if (/^\d{1,5}$/.test(String(nv).trim())) set('Punto de venta', R.formatPV(nv)); } },
+      { name: 'N.º comprobante', label: 'Número de comprobante', type: 'text', placeholder: '00001234', maxlength: 12, valid: (v, x) => (/^\d{1,8}$/.test(String(x).trim()) ? null : 'Solo números'), onChange: (v, set, nv) => { if (/^\d{1,8}$/.test(String(nv).trim())) set('N.º comprobante', R.formatNroComp(nv)); } },
+      { type: 'section', label: 'Importes' },
+      { name: 'Moneda', label: 'Moneda', type: 'chips', options: [{ value: 'ARS', label: 'Pesos' }, { value: 'USD', label: 'Dólares' }], required: true },
+      { name: 'Tipo de cambio', label: 'Tipo de cambio', type: 'number', unit: 'ARS/USD', show: (v) => v['Moneda'] === 'USD', hint: 'Opcional: el que figura en la factura.' },
+      { name: 'Total', label: 'Importe total', type: 'number', required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null), onChange: (v, set) => ivaDesdeTotal(v, set), hint: 'Lo que dice la factura al final, con IVA incluido.' },
+      { name: 'alicuota', label: 'IVA (para completar neto e IVA solos)', type: 'chips', options: R.ALICUOTAS_IVA, onChange: (v, set) => ivaDesdeTotal(v, set) },
+      { name: 'Neto gravado', label: 'Neto gravado', type: 'number' },
+      { name: 'IVA', label: 'IVA', type: 'number' },
+      { name: 'Otros impuestos', label: 'Otros impuestos (percepciones, etc.)', type: 'number', onChange: (v, set) => ivaDesdeTotal(v, set) },
+      { type: 'note', tone: 'warn', ic: 'alert', text: (v) => `Neto + IVA + otros impuestos da ${R.fmtMonto(suma(v), mon(v))} y el total es ${R.fmtMonto(v['Total'], mon(v))}.`, show: (v) => R.importesCierran(imp(v)) === false },
+      { type: 'section', label: 'Pago' },
+      { name: 'Estado de pago', label: 'Estado', type: 'chips', required: true, options: (v) => [{ value: 'Pendiente', label: 'Pendiente' }, { value: 'Pagada', label: v['Sentido'] === 'Emitida' ? 'Cobrada' : 'Pagada' }], onChange: (v, set, nv) => { if (nv === 'Pagada' && isBlank(v['Fecha de pago'])) set('Fecha de pago', todayStr()); } },
+      { name: 'Fecha de pago', label: 'Fecha de pago', type: 'date', show: (v) => v['Estado de pago'] === 'Pagada' },
+      { name: 'Vencimiento', label: 'Vence el', type: 'date', show: (v) => v['Estado de pago'] !== 'Pagada' },
+      { type: 'section', label: 'Más datos' },
+      { name: 'Descripción', label: 'Qué es (descripción)', type: 'text', placeholder: 'Ej. Gasoil, semilla, servicio de siembra…' },
+      { name: 'Unidad imputada', label: 'Imputar a', type: 'select', options: () => L(book, 'Unidad imputada gasto'), placeholder: 'Sin definir' },
+      { name: 'ID servicio vinculado', label: 'Servicio vinculado', type: 'ref', options: servOpts, show: (v) => v['Sentido'] === 'Emitida' && (live().serv || []).length > 0, placeholder: 'Opcional' },
+      { name: 'CAE', label: 'CAE', type: 'text', placeholder: 'Opcional', maxlength: 20, valid: (v, x) => (/^\d{10,16}$/.test(String(x).replace(/\s/g, '')) ? null : 'El CAE tiene entre 10 y 16 números') },
+      { name: 'Campaña', label: 'Campaña', type: 'select', options: () => campOpts(book), onChange: (v, set, nv) => { campManual = true; } },
+      { name: 'Estado dato', label: 'Estado del dato', type: 'chips', options: () => estadoDato(book) },
+      { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 2 },
+    ],
+    values: v0,
+    onSubmit: async (v) => {
+      const arch = v['Archivo'] && !v['Archivo'].existing ? v['Archivo'] : null; // archivo nuevo (si lo hay)
+      const keys = ['Sentido', 'Campaña', 'Fecha', 'Tipo comprobante', 'Punto de venta', 'N.º comprobante', 'Contraparte', 'CUIT contraparte', 'Descripción', 'Neto gravado', 'IVA', 'Otros impuestos', 'Total', 'Moneda', 'Tipo de cambio', 'Vencimiento', 'Estado de pago', 'Fecha de pago', 'CAE', 'Unidad imputada', 'ID servicio vinculado', 'Estado dato', 'Observaciones'];
+      const NUM = ['Neto gravado', 'IVA', 'Otros impuestos', 'Total', 'Tipo de cambio'];
+      const data = Object.fromEntries(keys.map((k) => [k, isBlank(v[k]) ? (NUM.includes(k) ? null : '') : (typeof v[k] === 'string' ? v[k].trim() : v[k])]));
+      if (data['CUIT contraparte']) data['CUIT contraparte'] = R.formatCuit(data['CUIT contraparte']);
+      if (data['Punto de venta']) data['Punto de venta'] = R.formatPV(data['Punto de venta']);
+      if (data['N.º comprobante']) data['N.º comprobante'] = R.formatNroComp(data['N.º comprobante']);
+      if (data['Estado de pago'] === 'Pagada') data['Vencimiento'] = ''; else data['Fecha de pago'] = '';
+      if (data['Moneda'] !== 'USD') data['Tipo de cambio'] = null;
+      if (data['Sentido'] !== 'Emitida') data['ID servicio vinculado'] = '';
+
+      // avisos que no bloquean: se pregunta antes de guardar
+      const dup = R.docDuplicado(live(), data, doc ? doc['ID documento'] : '');
+      if (dup) {
+        const si = await confirmDialog({ title: 'Parece repetida', message: `Ya hay una factura igual cargada (${dup['ID documento']} · ${dup['Contraparte'] || 'sin nombre'} · ${R.fmtMonto(dup['Total'], R.docMoneda(dup))}). ¿Cargarla igual?`, confirmLabel: 'Cargarla igual', cancelLabel: 'Volver' });
+        if (!si) return false;
+      }
+      if (R.importesCierran({ neto: data['Neto gravado'], iva: data['IVA'], otros: data['Otros impuestos'], total: data['Total'] }) === false) {
+        const si = await confirmDialog({ title: 'Los importes no cierran', message: `Neto + IVA + otros impuestos da ${R.fmtMonto(suma(data2(data)), mon(data))} y el total es ${R.fmtMonto(data['Total'], mon(data))}. ¿Guardar igual?`, confirmLabel: 'Guardar igual', cancelLabel: 'Revisar' });
+        if (!si) return false;
+      }
+
+      if (doc) {
+        const set = diff(doc, data);
+        let guardado = null;
+        if (arch) {
+          const nombre = R.nombreArchivoDoc({ ...doc, 'Contraparte': data['Contraparte'] }, extDe(arch));
+          guardado = { docId: doc['ID documento'], name: nombre, mime: arch.mime, size: arch.size, buf: arch.buf, w: arch.w, h: arch.h, uploaded: false, replace: tieneArchivoDoc(doc) && !isBlank(doc['ID archivo']) };
+          if (nombre !== doc['Archivo']) set['Archivo'] = nombre;
+        }
+        if (!Object.keys(set).length && !guardado) { toast('No hubo cambios', 'info'); return; }
+        if (guardado) await store.putFile(guardado);
+        if (Object.keys(set).length) await store.enqueue([{ t: 'update', tk: 'docs', key: doc['ID documento'], set }]);
+        else if (store.afterEnqueue) store.afterEnqueue(); // solo cambió el archivo: se pide la sincronización igual
+        toast('Factura actualizada');
+      } else {
+        const id = R.nuevoId(live(), 'docs', data);
+        const rec = { ...emptyRow('docs'), 'ID documento': id, ...compact(data) };
+        if (arch) {
+          const nombre = R.nombreArchivoDoc({ 'ID documento': id, 'Contraparte': data['Contraparte'] }, extDe(arch));
+          rec['Archivo'] = nombre;
+          await store.putFile({ docId: id, name: nombre, mime: arch.mime, size: arch.size, buf: arch.buf, w: arch.w, h: arch.h, uploaded: false });
+        }
+        await store.enqueue([{ t: 'append', tk: 'docs', rec }]);
+        toast('Factura guardada');
+        if (onCreated) onCreated(id);
+      }
+    },
+  });
+
+  function autoCuit(v, set, nv) {
+    if (!nv || !isBlank(v['CUIT contraparte'])) return;
+    const prev = (live().docs || []).find((d) => norm(d['Contraparte']) === norm(nv) && !isBlank(d['CUIT contraparte']));
+    if (prev) set('CUIT contraparte', prev['CUIT contraparte']);
+  }
+  function data2(d) { return { 'Neto gravado': d['Neto gravado'], 'IVA': d['IVA'], 'Otros impuestos': d['Otros impuestos'] }; }
+}
+const tieneArchivoDoc = (d) => !isBlank(d['ID archivo']) || !isBlank(d['Archivo']);
 
 function diff(old, data) {
   const set = {};

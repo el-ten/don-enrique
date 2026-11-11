@@ -56,7 +56,7 @@ function filterRows(book, segv) {
 
 export function selectFilter(label, options, value, onChange) {
   return h('label', { class: 'filter' }, h('span', null, label),
-    h('select', { class: 'input select sm', onchange: (e) => onChange(e.target.value) }, h('option', { value: '' }, 'Todas'), options.map((o) => h('option', { value: o, selected: o === value }, o))));
+    h('select', { class: 'input select sm', onchange: (e) => { const val = e.target.value; e.target.blur(); onChange(val); } }, h('option', { value: '' }, 'Todas'), options.map((o) => h('option', { value: o, selected: o === value }, o))));
 }
 
 function detail({ id, go, book }) {

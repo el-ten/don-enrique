@@ -68,6 +68,15 @@ export const TABLES = {
     kinds: { 'Fecha': 'date', 'Importe original ARS': 'num', 'Importe original USD': 'num', 'Cereal original kg': 'num', 'Tipo de cambio ARS/USD': 'num', 'Precio cereal aplicado USD/kg': 'num', 'Importe imputado USD': 'num', 'Cereal imputado kg': 'num' },
     formulaCols: [],
   },
+  // Facturas y otros comprobantes, emitidos y recibidos (hoja nueva 19_DOCUMENTOS). El archivo (foto o PDF) no va en la
+  // planilla: se guarda en una carpeta de Drive y acá quedan su nombre e ID. "Punto de venta" y "N.º comprobante" son
+  // texto (llevan ceros a la izquierda). Es opcional: si el script no la conoce, la sección Facturas avisa que falta actualizarlo.
+  docs: {
+    sheet: '19_DOCUMENTOS', key: 'ID documento', label: 'Facturas y comprobantes', optional: true,
+    headers: ['ID documento', 'Campaña', 'Sentido', 'Fecha', 'Tipo comprobante', 'Punto de venta', 'N.º comprobante', 'Contraparte', 'CUIT contraparte', 'Descripción', 'Neto gravado', 'IVA', 'Otros impuestos', 'Total', 'Moneda', 'Tipo de cambio', 'Vencimiento', 'Estado de pago', 'Fecha de pago', 'CAE', 'Unidad imputada', 'ID servicio vinculado', 'Archivo', 'ID archivo', 'Estado dato', 'Observaciones'],
+    kinds: { 'Fecha': 'date', 'Vencimiento': 'date', 'Fecha de pago': 'date', 'Neto gravado': 'num', 'IVA': 'num', 'Otros impuestos': 'num', 'Total': 'num', 'Tipo de cambio': 'num' },
+    formulaCols: [],
+  },
 };
 
 // Hoja de listas (catálogos). Se lee completa (primeras 21 filas).
@@ -100,6 +109,9 @@ export const DEFAULT_LISTS = {
   'Tipo servicio': ['Siembra', 'Cosecha', 'Pulverización', 'Fertilización', 'Otro'],
   'Tipo tarifa servicio': ['USD/ha', '% producción', 'Importe fijo', 'Sin definir'],
   'Entidad comercial': ['SH', 'David', 'Pendiente'],
+  // Facturas: la app usa estas listas fijas (la hoja 19_DOCUMENTOS no tiene validaciones, así que no hace falta tocar 01_CONFIGURACION).
+  'Sentido documento': ['Recibida', 'Emitida'],
+  'Estado de pago': ['Pendiente', 'Pagada'],
 };
 
 // Reglas de validación ESTRICTAS de la planilla real (revisadas el 08/11/2026). Si se escribe en una celda un valor

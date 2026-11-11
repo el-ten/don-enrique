@@ -21,7 +21,7 @@ function describeOp(op) {
   const nombre = T ? T.label : op.tk;
   if (op.t === 'append') {
     const r = op.rec;
-    const det = r['Camión / patente'] || r['Tarea'] || r['Tipo servicio'] || r['Nombre silo'] || r['Tipo movimiento'] || r['Tipo de movimiento'] || r['Campo'] || '';
+    const det = r['Contraparte'] || r['Camión / patente'] || r['Tarea'] || r['Tipo servicio'] || r['Nombre silo'] || r['Tipo movimiento'] || r['Tipo de movimiento'] || r['Campo'] || '';
     return `Nuevo en ${nombre}${det ? ': ' + det : ''}`;
   }
   return `Cambio en ${nombre} (${Object.keys(op.set).slice(0, 3).join(', ')}${Object.keys(op.set).length > 3 ? '…' : ''})`;
@@ -64,6 +64,7 @@ export function render({ go, book }) {
       h('div', { class: 'grow' }, h('b', null, mode === 'live' ? 'Conectada a tu planilla' : mode === 'demo' ? 'Modo demo (datos de ejemplo)' : 'Sin conectar'),
         h('div', { class: 'sub' }, `${store.online ? 'Con señal' : 'Sin señal'} · última sincronización ${ago(store.sync.lastSync)}`))),
     store.sync.error ? h('div', { class: 'note note-warn' }, icon('alert', 18), h('span', null, store.sync.error)) : null,
+    store.sync.fileError ? h('div', { class: 'note note-warn' }, icon('alert', 18), h('span', null, `No se pudo subir un archivo de factura a Drive: ${store.sync.fileError}`)) : null,
     ...((store.snapshot && store.snapshot.avisos) || []).map((a) => h('div', { class: 'note note-warn' }, icon('alert', 18), h('span', null, `La planilla avisó: ${a}`))),
     h('div', { class: 'btn-col' }, button({ label: isSyncing() ? 'Sincronizando…' : 'Sincronizar ahora', ic: 'refresh', tone: 'primary', size: 'lg', block: true, disabled: isSyncing() || !store.online, onClick: async () => { const r = await sync(); toast(r.ok ? 'Todo al día' : r.error, r.ok ? 'ok' : 'warn', 3500); } })),
     h('p', { class: 'hint' }, 'En el iPhone la app no puede subir cambios sola cuando está cerrada: abrila con señal y se sincroniza.'),

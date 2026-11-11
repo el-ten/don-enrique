@@ -1,6 +1,6 @@
 // Sincronización: sube la cola de cambios y baja la última copia de la planilla.
 import { store } from './store.js';
-import { api, NetworkError } from './api.js';
+import { api, NetworkError, ServerError } from './api.js';
 import { normalizeRead } from './model.js';
 
 let running = null;
@@ -10,6 +10,27 @@ const firma = (snap) => (snap ? JSON.stringify([snap.tables, snap.cfg, snap.avis
 function sameData(a, b) { return !!a && firma(a) === firma(b); }
 
 export function isSyncing() { return !!running; }
+
+// Sube a Drive los archivos pendientes. Un archivo espera a que su factura ya esté en la planilla. Si el servidor rechaza uno
+// (por ejemplo, falta autorizar Drive en el script), no frena el resto de la sincronización: queda el aviso y se reintenta.
+async function subirArchivos() {
+  let pend = [];
+  try { pend = await store.pendingFiles(); } catch { return; }
+  if (!pend.length) { store.sync.fileError = null; return; }
+  const esperando = new Set(store.ops.filter((o) => o.tk === 'docs' && o.t === 'append' && o.rec).map((o) => o.rec['ID documento']));
+  let err = null;
+  for (const f of pend) {
+    if (esperando.has(f.docId)) continue;
+    try {
+      await api.upload(f);
+      await store.markFileUploaded(f.docId);
+    } catch (e) {
+      if (e instanceof NetworkError) throw e;
+      err = e instanceof ServerError ? e.message : String((e && e.message) || e);
+    }
+  }
+  store.sync.fileError = err;
+}
 
 // quiet: sincronización automática de fondo. Si no hay nada para subir, no cambia el botón de arriba ni redibuja la pantalla
 //        (solo se nota si la planilla trajo datos nuevos o si hay un problema).
@@ -33,6 +54,8 @@ export function sync({ pull = true, quiet = false, minAge = 0 } = {}) {
         }
         await store.removeOps(okIds);
       }
+      // 1b) subir los archivos de las facturas (foto o PDF) que ya tienen su fila en la planilla
+      await subirArchivos();
       // 2) bajar la planilla
       if (pull) {
         const raw = await api.read();
