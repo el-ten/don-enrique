@@ -42,7 +42,9 @@ async function call(body, timeoutMs = 25000, override = null) {
       signal: ctl.signal,
     });
   } catch (e) {
-    throw new NetworkError(e && e.name === 'AbortError' ? 'Tardó demasiado en responder' : 'Sin conexión');
+    const err = new NetworkError(e && e.name === 'AbortError' ? 'Tardó demasiado en responder' : 'Sin conexión');
+    err.timeout = !!(e && e.name === 'AbortError'); // si fue por demora (y no porque el pedido falló enseguida) no conviene reintentar
+    throw err;
   } finally { clearTimeout(t); }
   if (!res.ok) throw new ServerError(`El servidor respondió ${res.status}`, 'http');
   const txt = await res.text();

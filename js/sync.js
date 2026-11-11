@@ -11,6 +11,21 @@ function sameData(a, b) { return !!a && firma(a) === firma(b); }
 
 export function isSyncing() { return !!running; }
 
+// Al abrir la app el iPhone a veces falla el primer pedido porque la conexión todavía no despertó, y un segundo después anda.
+// Si el pedido falla enseguida y el teléfono no dice que está sin red, se reintenta solo un par de veces antes de mostrar "Sin señal".
+// Si el teléfono avisa que no hay red, o si el pedido tardó demasiado, no se espera de más: se muestra "Sin señal" de una.
+export const reintentos = { esperas: [1500, 4000] };
+const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
+async function conReintentos(fn) {
+  for (let i = 0; ; i++) {
+    try { return await fn(); } catch (e) {
+      const sinRed = typeof navigator !== 'undefined' && navigator.onLine === false;
+      if (!(e instanceof NetworkError) || e.timeout || sinRed || i >= reintentos.esperas.length) throw e;
+      await dormir(reintentos.esperas[i]);
+    }
+  }
+}
+
 // Sube a Drive los archivos pendientes. Un archivo espera a que su factura ya esté en la planilla. Si el servidor rechaza uno
 // (por ejemplo, falta autorizar Drive en el script), no frena el resto de la sincronización: queda el aviso y se reintenta.
 async function subirArchivos() {
@@ -43,27 +58,29 @@ export function sync({ pull = true, quiet = false, minAge = 0 } = {}) {
     const silent = quiet && !store.pending() && store.sync.state === 'idle' && store.online;
     if (!silent) { store.sync.state = 'syncing'; store.sync.error = null; store.emit(); }
     try {
-      // 1) subir cambios
-      const ops = store.ops.filter((o) => !o.failed);
-      if (ops.length) {
-        const res = await api.write(ops);
-        const okIds = [];
-        for (const r of res.results || []) {
-          if (r.ok) okIds.push(r.id);
-          else await store.markFailed(r.id, r.error || 'Error');
+      await conReintentos(async () => {
+        // 1) subir cambios
+        const ops = store.ops.filter((o) => !o.failed);
+        if (ops.length) {
+          const res = await api.write(ops);
+          const okIds = [];
+          for (const r of res.results || []) {
+            if (r.ok) okIds.push(r.id);
+            else await store.markFailed(r.id, r.error || 'Error');
+          }
+          await store.removeOps(okIds);
         }
-        await store.removeOps(okIds);
-      }
-      // 1b) subir los archivos de las facturas (foto o PDF) que ya tienen su fila en la planilla
-      await subirArchivos();
-      // 2) bajar la planilla
-      if (pull) {
-        const raw = await api.read();
-        const norm = normalizeRead(raw);
-        const snap = { at: new Date().toISOString(), tables: norm.tables, cfg: norm.cfg, serverTime: norm.serverTime, avisos: norm.avisos };
-        if (silent && sameData(store.snapshot, snap)) await store.touchSync(); // sin novedades: no se redibuja nada
-        else await store.saveSnapshot(snap);
-      }
+        // 1b) subir los archivos de las facturas (foto o PDF) que ya tienen su fila en la planilla
+        await subirArchivos();
+        // 2) bajar la planilla
+        if (pull) {
+          const raw = await api.read();
+          const norm = normalizeRead(raw);
+          const snap = { at: new Date().toISOString(), tables: norm.tables, cfg: norm.cfg, serverTime: norm.serverTime, avisos: norm.avisos };
+          if (silent && sameData(store.snapshot, snap)) await store.touchSync(); // sin novedades: no se redibuja nada
+          else await store.saveSnapshot(snap);
+        }
+      });
       store.sync.state = 'idle'; store.sync.offline = false; store.online = true;
       if (!silent) store.rebuild();
       return { ok: true };
