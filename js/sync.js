@@ -1,7 +1,8 @@
 // Sincronización: sube la cola de cambios y baja la última copia de la planilla.
 import { store } from './store.js';
 import { api, NetworkError, ServerError } from './api.js';
-import { normalizeRead } from './model.js';
+import { normalizeRead, buildBook } from './model.js';
+import { opsReconciliarProduccion } from './rules.js';
 
 let running = null;
 let timer = null;
@@ -10,6 +11,17 @@ const firma = (snap) => (snap ? JSON.stringify([snap.tables, snap.cfg, snap.avis
 function sameData(a, b) { return !!a && firma(a) === firma(b); }
 
 export function isSyncing() { return !!running; }
+
+// Las producciones que creó la app muestran en la planilla los kilos de sus camiones: después de bajar la planilla se compara y, si
+// no coinciden, se encola la corrección (se sube en la próxima sincronización). No es crítico: si algo falla, no frena nada.
+async function copiarKilosDeProduccion() {
+  try {
+    if (!store.snapshot) return;
+    const ops = opsReconciliarProduccion(buildBook(store.snapshot, []))
+      .filter((o) => !store.ops.some((x) => x.tk === 'prod' && x.key === o.key));
+    if (ops.length) await store.enqueue(ops);
+  } catch { /* se reintenta en la próxima sincronización */ }
+}
 
 // Al abrir la app el iPhone a veces falla el primer pedido porque la conexión todavía no despertó, y un segundo después anda.
 // Si el pedido falla enseguida y el teléfono no dice que está sin red, se reintenta solo un par de veces antes de mostrar "Sin señal".
@@ -83,6 +95,7 @@ export function sync({ pull = true, quiet = false, minAge = 0 } = {}) {
       });
       store.sync.state = 'idle'; store.sync.offline = false; store.online = true;
       if (!silent) store.rebuild();
+      if (pull) await copiarKilosDeProduccion();
       return { ok: true };
     } catch (e) {
       // En segundo plano y sin nada pendiente, un fallo que no sea de señal no asusta con un cartel: se reintenta solo.

@@ -232,7 +232,7 @@ export function prodView(p, book) {
   const kgOk = sum(movs.filter((m) => control(m) === 'Dentro de tolerancia'), (m) => m['Kg asignados']);
   const kgRev = sum(movs.filter((m) => control(m) === 'Revisar diferencia'), (m) => m['Kg asignados']);
   const kgSilo = sum(movs.filter((m) => !m['ID carga'] && TIPOS_ENTRADA_DIRECTA.includes(m['Tipo de movimiento'])), (m) => m['Kg asignados']);
-  const manual = p['Producción kg'];
+  const manual = esProduccionAuto(p) ? null : p['Producción kg'];
   const kgFinal = !isBlank(manual) && manual > 0 ? manual : kgCos;
   const ha = p['Ha cosechadas'];
   const rinde = !isBlank(ha) && ha > 0 && kgFinal > 0 ? Math.round(kgFinal / ha) / 100 : null;
@@ -247,6 +247,10 @@ export function prodName(p) {
 // El hilo es el lote: una labor de cosecha de un lote, en una campaña y con un cultivo, tiene UNA producción. Al iniciar la labor la
 // app la crea sola (si todavía no existe); los camiones la van sumando por el lote; al terminar la labor se completan las hectáreas
 // y la fecha de fin. Una producción que ya tiene "Producción kg" cargado a mano (las del historial) no se toca.
+// Las producciones que crea la app llevan esta marca al principio de las observaciones. En ellas los kilos son los de las
+// descargas de los camiones (la app los copia a la hoja); en las demás, un "Producción kg" cargado a mano manda.
+export const MARCA_AUTO = 'Creada automáticamente desde la labor de cosecha.';
+export function esProduccionAuto(p) { return !!p && String(p['Observaciones'] || '').trim().startsWith(MARCA_AUTO); }
 const mismoLote = (l, x, loteCol) => norm(x['Campaña']) === norm(l['Campaña']) && norm(x['Cultivo']) === norm(l['Cultivo']) &&
   norm(x['Campo / cliente']) === norm(l['Campo / cliente']) && norm(x[loteCol]) === norm(l['Lote']);
 export function laborEsCosechaDeLote(l) {
@@ -270,7 +274,7 @@ export function produccionDeLabor(book, l) {
 export function opsProduccion(book, l, prev = null) {
   if (!book || !l || !l['ID labor'] || !laborEsCosechaDeLote(l)) return [];
   const prod = produccionDeLabor(book, l);
-  if (prod && Number(prod['Producción kg']) > 0) return [];
+  if (prod && !esProduccionAuto(prod) && Number(prod['Producción kg']) > 0) return [];
   const terminada = l['Estado labor'] === 'Terminado';
   const otras = (book.labores || []).filter((x) => x['ID labor'] !== l['ID labor'] && x['Tarea'] === 'Cosecha' && x['Estado labor'] === 'Terminado' && mismoLote(l, x, 'Lote'));
   const haOtras = sum(otras, (x) => Number(x['Ha realizadas']) || 0);
@@ -287,7 +291,7 @@ export function opsProduccion(book, l, prev = null) {
       'Campaña': l['Campaña'], 'Fecha inicio cosecha': iniNuevo, 'Fecha fin cosecha': terminada ? finNuevo : '', 'Unidad': l['Unidad'] || '',
       'Campo / cliente': l['Campo / cliente'], 'Lote / condición': l['Lote'], 'Cultivo': l['Cultivo'], 'Tipo / época': 'Sin distinguir',
       'Ha cosechadas': terminada && haNuevo > 0 ? haNuevo : null, 'ID labor vinculada': l['ID labor'], 'Estado dato': l['Estado dato'] || 'Confirmado',
-      'Observaciones': 'Creada automáticamente desde la labor de cosecha. Los kilos salen solos de las descargas de los camiones.',
+      'Observaciones': `${MARCA_AUTO} Los kilos salen solos de las descargas de los camiones.`,
     };
     const rec = { ...emptyRow('prod'), ...Object.fromEntries(Object.entries(datos).filter(([, v]) => !(v === '' || v === null || v === undefined))) };
     return [{ t: 'append', tk: 'prod', rec }];
@@ -306,6 +310,19 @@ export function opsProduccion(book, l, prev = null) {
   const iniP = prod['Fecha inicio cosecha'];
   if (iniNuevo && iniP !== iniNuevo && (isBlank(iniP) || iniP === iniOtras)) set['Fecha inicio cosecha'] = iniNuevo;
   return Object.keys(set).length ? [{ t: 'update', tk: 'prod', key: prod['ID producción'], set }] : [];
+}
+
+// Copia a la hoja los kilos de las producciones que creó la app: "Producción kg" = suma de sus descargas ya subidas a la planilla
+// (así la planilla también muestra los kilos y el rinde). `base` = los datos tal como están en la planilla, sin cambios pendientes
+// del celular. Las producciones cargadas a mano o con otra marca no se tocan, y si no hay descargas no se escribe nada.
+export function opsReconciliarProduccion(base) {
+  const ops = [];
+  for (const p of (base && base.prod) || []) {
+    if (!esProduccionAuto(p)) continue;
+    const kg = Math.round(prodView(p, base).kgCos);
+    if (kg > 0 && kg !== Math.round(Number(p['Producción kg']) || 0)) ops.push({ t: 'update', tk: 'prod', key: p['ID producción'], set: { 'Producción kg': kg } });
+  }
+  return ops;
 }
 
 // ------------------------------------------------------------------ COMBUSTIBLE

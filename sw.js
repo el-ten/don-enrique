@@ -1,7 +1,7 @@
 // Service worker de Don Enrique: guarda la app en el celular para que abra sin señal.
 // Las llamadas a la planilla (otro dominio) nunca pasan por acá: las maneja la app con su cola de cambios.
 /* STAMP:BEGIN */
-const BUILD = '0e9da47cee';
+const BUILD = '41334fe9e4';
 const SHELL = ["./","css/app.css","icons/apple-touch-icon.png","icons/favicon-32.png","icons/icon-192.png","icons/icon-512.png","icons/maskable-512.png","index.html","js/api.js","js/connect.js","js/files.js","js/forms.js","js/icons.js","js/main.js","js/mock.js","js/model.js","js/pdf.js","js/rules.js","js/schema.js","js/store.js","js/sync.js","js/ui.js","js/util.js","js/views/actions.js","js/views/ajustes.js","js/views/bienvenida.js","js/views/combustible.js","js/views/cosecha.js","js/views/facturas.js","js/views/home.js","js/views/labores.js","js/views/mas.js","js/views/servicios.js","js/views/shared.js","manifest.webmanifest"];
 /* STAMP:END */
 const CACHE = `de-shell-${BUILD}`;

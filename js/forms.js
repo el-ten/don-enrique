@@ -348,6 +348,8 @@ export function prodForm(book, prod = null) {
       if (edit) {
         const set = diff(prod, data);
         if (!Object.keys(set).length) return;
+        // si en una producción automática se carga a mano el total, deja de seguir a los camiones: se quita la marca
+        if (R.esProduccionAuto(prod) && 'Producción kg' in set && !isBlank(set['Producción kg'])) set['Observaciones'] = String(set['Observaciones'] ?? prod['Observaciones'] ?? '').replace(R.MARCA_AUTO, 'Total cargado a mano.');
         await store.enqueue([{ t: 'update', tk: 'prod', key: prod['ID producción'], set }]);
       } else {
         await store.enqueue([{ t: 'append', tk: 'prod', rec: { ...emptyRow('prod'), 'ID producción': R.nuevoId(store.book || book, 'prod', data), ...compact(data) } }]);
