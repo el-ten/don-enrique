@@ -115,7 +115,8 @@ body.sheet-full-open #edge-band { background-color: var(--surface); }
 /* si el iPhone "rebota" al tirar la pantalla hacia abajo, el verde de la barra sigue hacia arriba y no queda un hueco oscuro */
 .appbar::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 100vh; background: var(--green-d); pointer-events: none; }
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.logo { display: inline-flex; border-radius: 10px; box-shadow: 0 0 0 1px rgba(255, 255, 255, .12); }
+.logo { display: inline-flex; flex: none; border-radius: 7.5px; box-shadow: 0 0 0 1px rgba(255, 255, 255, .12); }
+.logo svg { display: block; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.1; white-space: nowrap; }
 .brand-text b { font: 700 1.1rem/1.1 var(--serif); letter-spacing: .01em; }
 .brand-text small { font-size: .72rem; opacity: .7; letter-spacing: .06em; text-transform: uppercase; }

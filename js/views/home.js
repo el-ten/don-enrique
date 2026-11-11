@@ -105,12 +105,17 @@ function tank(name, litros, cap) {
 function furrows() {
   const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   // El dibujo tiene tamaño fijo (400 x 190 px) y queda pegado a la derecha: el horizonte (y = 96) no depende del ancho de la pantalla,
-  // así el saludo siempre queda arriba de la línea. La línea y la tierra se extienden hacia la izquierda con overflow visible.
+  // así el saludo siempre queda arriba de la línea. Todo lo que sale del sol se va apagando antes de llegar a un borde o a los números:
+  // los rayos se desvanecen hacia abajo (terminan en y = 140, los números empiezan en y ≈ 151) y el horizonte se desvanece hacia los costados.
   s.setAttribute('viewBox', '0 0 400 190');
-  s.innerHTML = '<defs><linearGradient id="sun" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f7cf6b"/><stop offset="1" stop-color="#e3921d"/></linearGradient>' +
-    '<linearGradient id="soilfade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0c3324" stop-opacity=".6"/><stop offset="1" stop-color="#0c3324" stop-opacity="0"/></linearGradient></defs>' +
-    '<circle cx="322" cy="96" r="30" fill="url(#sun)" opacity=".95"/><rect x="-2000" y="96" width="4400" height="94" fill="url(#soilfade)"/>' +
-    '<g stroke="#f6efdc" stroke-width="1.3" stroke-linecap="round" opacity=".3"><path d="M322 96 132 190M322 96 198 190M322 96 264 190M322 96 322 190M322 96 380 190M322 96 447 190"/></g>' +
-    '<path d="M-2000 96H2400" stroke="#f6efdc" opacity=".28"/>';
+  const rays = [-64, -32, 0, 32, 64].map((dx) => `M322 96 L${322 + dx} 140`).join('');
+  s.innerHTML = '<defs><linearGradient id="hsun" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f7cf6b"/><stop offset="1" stop-color="#e3921d"/></linearGradient>' +
+    '<linearGradient id="hsoil" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0c3324" stop-opacity=".6"/><stop offset="1" stop-color="#0c3324" stop-opacity="0"/></linearGradient>' +
+    '<linearGradient id="hray" gradientUnits="userSpaceOnUse" x1="0" y1="96" x2="0" y2="140"><stop offset="0" stop-color="#f6efdc" stop-opacity=".6"/><stop offset="1" stop-color="#f6efdc" stop-opacity="0"/></linearGradient>' +
+    '<linearGradient id="hline" gradientUnits="userSpaceOnUse" x1="-400" y1="0" x2="400" y2="0"><stop offset="0" stop-color="#f6efdc" stop-opacity="0"/><stop offset=".6" stop-color="#f6efdc" stop-opacity=".2"/><stop offset=".9" stop-color="#f6efdc" stop-opacity=".5"/><stop offset="1" stop-color="#f6efdc" stop-opacity="0"/></linearGradient></defs>' +
+    '<rect x="-2000" y="96" width="4400" height="94" fill="url(#hsoil)"/>' +
+    '<path d="M292 96A30 30 0 0 1 352 96Z" fill="url(#hsun)" opacity=".95"/>' +
+    `<path d="${rays}" fill="none" stroke="url(#hray)" stroke-width="1.4" stroke-linecap="round"/>` +
+    '<path d="M-400 96H400" stroke="url(#hline)" stroke-width="1.2" fill="none"/>';
   return s;
 }
