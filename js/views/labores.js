@@ -3,7 +3,7 @@ import { h, section, kv, emptyState, seg, button, chip } from '../ui.js';
 import { icon } from '../icons.js';
 import * as R from '../rules.js';
 import * as F from '../forms.js';
-import { laborCard, searchBox, pageHead, detailHead, estadoChip, datoChip, card, combCard, cargaCard } from './shared.js';
+import { laborCard, searchBox, pageHead, detailHead, estadoChip, datoChip, card, combCard, cargaCard, statBox } from './shared.js';
 import { laborButtons } from './actions.js';
 import { fmtDate, fmtHa, fmtDur, fmt2, fmtL, fmtKg, norm, unique, sortEs, isBlank } from '../util.js';
 
@@ -67,6 +67,8 @@ function detail({ id, go, book }) {
   const rend = R.laborRend(l);
   const combs = book.comb.filter((m) => m['ID labor vinculada'] === l['ID labor']);
   const cargas = book.cargas.filter((c) => c['ID labor vinculada'] === l['ID labor']);
+  const prodLabor = l['Tarea'] === 'Cosecha' ? R.produccionDeLabor(book, l) : null;
+  const pv = prodLabor ? R.prodView(prodLabor, book) : null;
   const fuelL = combs.reduce((a, m) => a + (m['Computa consumo labor'] === 'Sí' ? (m['Litros'] || 0) : 0), 0);
   return {
     node: h('div', { class: 'page' },
@@ -89,6 +91,10 @@ function detail({ id, go, book }) {
         kv('Combustible de la labor', fuelL ? fmtL(fuelL) : ''),
         l['Tarea'] === 'Cosecha' ? kv('Kg cosechados (descargas)', fmtKg(book.movs.filter((m) => m['ID labor vinculada'] === l['ID labor'] && R.computaApp(m) === 'Sí').reduce((a, m) => a + (m['Kg asignados'] || 0), 0))) : null,
       ])),
+      prodLabor ? section('Producción del lote', card([
+        h('div', { class: 'stats three flat' }, statBox('Kilos', fmtKg(pv.kgFinal).replace(/\s*kg$/, '')), statBox('Camiones', pv.camiones || '—'), statBox('Rinde qq/ha', pv.rinde === null ? '—' : fmt2(pv.rinde))),
+        kv('Producción', R.prodName(prodLabor)),
+        h('div', { class: 'btn-col' }, button({ label: 'Ver la producción', ic: 'seedling', tone: 'soft', block: true, onClick: () => go(`produccion/${encodeURIComponent(prodLabor['ID producción'])}`) }))])) : l['Tarea'] === 'Cosecha' && R.laborEsCosechaDeLote(l) ? section('Producción del lote', card([h('p', { class: 'prose' }, 'Todavía no tiene producción: se crea sola al abrir el primer camión o al editar la labor.')])) : null,
       l['Novedades'] ? section('Novedades', card([h('p', { class: 'prose' }, l['Novedades'])])) : null,
       combs.length ? section('Combustible vinculado', combs.map((m) => combCard(m, () => go(`combustible/${encodeURIComponent(m['ID movimiento combustible'])}`)))) : null,
       cargas.length ? section('Camiones de esta labor', cargas.map((c) => cargaCard(c, book, () => go(`cosecha/${encodeURIComponent(c['ID carga'])}`)))) : null,

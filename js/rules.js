@@ -243,6 +243,71 @@ export function prodName(p) {
   return `${p['Cultivo']} ${p['Campaña']} · ${p['Campo / cliente']} — ${p['Lote / condición']}${isBlank(p['Ha cosechadas']) ? '' : ` · ${p['Ha cosechadas']} ha`}`;
 }
 
+// ------------------------------------------------------------------ COSECHA → PRODUCCIÓN
+// El hilo es el lote: una labor de cosecha de un lote, en una campaña y con un cultivo, tiene UNA producción. Al iniciar la labor la
+// app la crea sola (si todavía no existe); los camiones la van sumando por el lote; al terminar la labor se completan las hectáreas
+// y la fecha de fin. Una producción que ya tiene "Producción kg" cargado a mano (las del historial) no se toca.
+const mismoLote = (l, x, loteCol) => norm(x['Campaña']) === norm(l['Campaña']) && norm(x['Cultivo']) === norm(l['Cultivo']) &&
+  norm(x['Campo / cliente']) === norm(l['Campo / cliente']) && norm(x[loteCol]) === norm(l['Lote']);
+export function laborEsCosechaDeLote(l) {
+  return !!l && l['Tarea'] === 'Cosecha' && ['Campaña', 'Cultivo', 'Campo / cliente', 'Lote'].every((k) => !isBlank(l[k]));
+}
+// La producción de una labor: la que la tiene vinculada o, si no, la del mismo lote, cultivo y campaña.
+export function produccionDeLabor(book, l) {
+  const prods = (book && book.prod) || [];
+  if (!l) return null;
+  const porId = l['ID labor'] ? prods.find((p) => splitList(p['ID labor vinculada']).includes(l['ID labor'])) : null;
+  if (porId) return porId;
+  if (!laborEsCosechaDeLote(l)) return null;
+  const hay = prods.filter((p) => mismoLote(l, p, 'Lote / condición'));
+  return hay.length ? hay[hay.length - 1] : null;
+}
+// Cambios que mantienen al día la producción de una labor de cosecha (o [] si no hay nada para hacer):
+//  · si todavía no hay producción del lote, la crea (con las hectáreas y la fecha de fin si la labor ya terminó);
+//  · si ya hay, la vincula a la labor (si no tenía labor) y, al terminar la labor, suma las hectáreas y corre la fecha de fin.
+// Las hectáreas y fechas solo se actualizan si siguen siendo las que puso la propia app (vacías o iguales a las de las labores
+// ya sumadas): si alguien las corrigió a mano, no se pisan. `prev` = la labor antes del cambio (para poder corregir una labor ya sumada).
+export function opsProduccion(book, l, prev = null) {
+  if (!book || !l || !l['ID labor'] || !laborEsCosechaDeLote(l)) return [];
+  const prod = produccionDeLabor(book, l);
+  if (prod && Number(prod['Producción kg']) > 0) return [];
+  const terminada = l['Estado labor'] === 'Terminado';
+  const otras = (book.labores || []).filter((x) => x['ID labor'] !== l['ID labor'] && x['Tarea'] === 'Cosecha' && x['Estado labor'] === 'Terminado' && mismoLote(l, x, 'Lote'));
+  const haOtras = sum(otras, (x) => Number(x['Ha realizadas']) || 0);
+  const finOtras = otras.map((x) => x['Fecha fin'] || x['Fecha inicio']).filter(Boolean).sort().pop() || '';
+  const iniOtras = otras.map((x) => x['Fecha inicio']).filter(Boolean).sort()[0] || '';
+  const haL = terminada ? Number(l['Ha realizadas']) || 0 : 0;
+  const finL = terminada ? (l['Fecha fin'] || l['Fecha inicio'] || '') : '';
+  const haNuevo = haOtras + haL;
+  const finNuevo = [finOtras, finL].filter(Boolean).sort().pop() || '';
+  const iniNuevo = [iniOtras, l['Fecha inicio']].filter(Boolean).sort()[0] || '';
+  if (!prod) {
+    const datos = {
+      'ID producción': nuevoId(book, 'prod', { 'Campaña': l['Campaña'], 'Cultivo': l['Cultivo'] }),
+      'Campaña': l['Campaña'], 'Fecha inicio cosecha': iniNuevo, 'Fecha fin cosecha': terminada ? finNuevo : '', 'Unidad': l['Unidad'] || '',
+      'Campo / cliente': l['Campo / cliente'], 'Lote / condición': l['Lote'], 'Cultivo': l['Cultivo'], 'Tipo / época': 'Sin distinguir',
+      'Ha cosechadas': terminada && haNuevo > 0 ? haNuevo : null, 'ID labor vinculada': l['ID labor'], 'Estado dato': l['Estado dato'] || 'Confirmado',
+      'Observaciones': 'Creada automáticamente desde la labor de cosecha. Los kilos salen solos de las descargas de los camiones.',
+    };
+    const rec = { ...emptyRow('prod'), ...Object.fromEntries(Object.entries(datos).filter(([, v]) => !(v === '' || v === null || v === undefined))) };
+    return [{ t: 'append', tk: 'prod', rec }];
+  }
+  const set = {};
+  if (isBlank(prod['ID labor vinculada'])) set['ID labor vinculada'] = l['ID labor'];
+  if (terminada) {
+    const prevOk = prev && prev['Estado labor'] === 'Terminado';
+    const haPrev = prevOk ? Number(prev['Ha realizadas']) || 0 : 0;
+    const finPrev = prevOk ? (prev['Fecha fin'] || prev['Fecha inicio'] || '') : '';
+    const ha = Number(prod['Ha cosechadas']);
+    if (haNuevo > 0 && ha !== haNuevo && (isBlank(prod['Ha cosechadas']) || ha === haOtras || ha === haOtras + haPrev)) set['Ha cosechadas'] = haNuevo;
+    const finP = prod['Fecha fin cosecha'];
+    if (finNuevo && finP !== finNuevo && (isBlank(finP) || finP === finOtras || finP === [finOtras, finPrev].filter(Boolean).sort().pop())) set['Fecha fin cosecha'] = finNuevo;
+  }
+  const iniP = prod['Fecha inicio cosecha'];
+  if (iniNuevo && iniP !== iniNuevo && (isBlank(iniP) || iniP === iniOtras)) set['Fecha inicio cosecha'] = iniNuevo;
+  return Object.keys(set).length ? [{ t: 'update', tk: 'prod', key: prod['ID producción'], set }] : [];
+}
+
 // ------------------------------------------------------------------ COMBUSTIBLE
 const ENTRAN = ['Compra / ingreso', 'Stock inicial', 'Devolución', 'Ajuste positivo'];
 const SALEN = ['Carga a maquinaria', 'Salida a tercero', 'Ajuste negativo'];

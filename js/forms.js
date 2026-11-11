@@ -27,9 +27,10 @@ export function loteAdd(book) {
     }),
   };
 }
-export function laborOptions(book, { onlyCosecha = false } = {}) {
+export function laborOptions(book, { onlyCosecha = false, abiertasPrimero = false } = {}) {
+  const abierta = (l) => (abiertasPrimero && R.isOpen(l) ? 1 : 0);
   return [...book.labores].filter((l) => !onlyCosecha || l['Tarea'] === 'Cosecha')
-    .sort((a, b) => (b['Fecha inicio'] + (b['Hora inicio'] || '')).localeCompare(a['Fecha inicio'] + (a['Hora inicio'] || '')))
+    .sort((a, b) => abierta(b) - abierta(a) || (b['Fecha inicio'] + (b['Hora inicio'] || '')).localeCompare(a['Fecha inicio'] + (a['Hora inicio'] || '')))
     .map((l) => ({ value: l['ID labor'], label: R.laborTitle(l), sub: `${fmtDate(l['Fecha inicio'])} · ${l['Estado labor']}` }));
 }
 export function prodOptions(book) {
@@ -125,8 +126,9 @@ export function laborForm(book, { mode = 'curso', labor = null } = {}) {
         if (!Object.keys(set).length) { toast('No hubo cambios', 'info'); return; }
         // si con este cambio la labor pasa a "Terminado" y es de servicio, también se carga en la hoja de servicios
         const serv = labor['Estado labor'] !== 'Terminado' && set['Estado labor'] === 'Terminado' ? R.opsServicio(live(), { ...labor, ...set }) : [];
-        await store.enqueue([{ t: 'update', tk: 'labores', key: labor['ID labor'], set }, ...serv]);
-        toast(serv.length ? `Cambios guardados y ${serv[0].t === 'update' ? 'labor sumada a su servicio' : 'servicio cargado'}` : 'Cambios guardados');
+        const prodE = R.opsProduccion(live(), { ...labor, ...set }, labor);
+        await store.enqueue([{ t: 'update', tk: 'labores', key: labor['ID labor'], set }, ...serv, ...prodE]);
+        toast(serv.length ? `Cambios guardados y ${serv[0].t === 'update' ? 'labor sumada a su servicio' : 'servicio cargado'}` : prodE.length ? 'Cambios guardados y producción actualizada' : 'Cambios guardados');
       } else {
         const rec = compact({
           'ID labor': R.nuevoId(live(), 'labores', base), ...base,
@@ -134,8 +136,11 @@ export function laborForm(book, { mode = 'curso', labor = null } = {}) {
         });
         const full = { ...emptyRow('labores'), ...rec };
         const serv = manual ? R.opsServicio(live(), full) : [];
-        await store.enqueue([{ t: 'append', tk: 'labores', rec: full }, ...serv]);
-        toast(manual ? (serv.length ? `Labor guardada y ${serv[0].t === 'update' ? 'sumada a su servicio' : 'servicio cargado'}` : 'Labor guardada') : 'Labor iniciada');
+        // labor de cosecha: se crea sola la producción del lote (o se vincula a la que ya existe)
+        const prod = R.opsProduccion(live(), full);
+        await store.enqueue([{ t: 'append', tk: 'labores', rec: full }, ...serv, ...prod]);
+        const extra = prod.length ? (prod[0].t === 'append' ? ' y producción creada' : ' y producción actualizada') : '';
+        toast(manual ? (serv.length ? `Labor guardada y ${serv[0].t === 'update' ? 'sumada a su servicio' : 'servicio cargado'}${extra}` : `Labor guardada${extra}`) : `Labor iniciada${extra}`);
       }
     },
   });
@@ -151,15 +156,18 @@ export function finalizarForm(labor) {
       const ops = R.labOpsFinalizar(labor, v.ha);
       // labor de servicio: se carga sola en la hoja de servicios (R.opsServicio devuelve [] si no corresponde)
       const serv = R.opsServicio(store.book, { ...labor, ...ops[0].set });
-      await store.enqueue([...ops, ...serv]);
-      toast(serv.length ? `Labor finalizada y ${serv[0].t === 'update' ? 'sumada a su servicio' : 'cargada en Servicios'}` : 'Labor finalizada');
+      // labor de cosecha: se completan las hectáreas y la fecha de fin de la producción del lote
+      const prod = R.opsProduccion(store.book, { ...labor, ...ops[0].set }, labor);
+      await store.enqueue([...ops, ...serv, ...prod]);
+      toast(serv.length ? `Labor finalizada y ${serv[0].t === 'update' ? 'sumada a su servicio' : 'cargada en Servicios'}` : prod.length ? 'Labor finalizada y producción actualizada' : 'Labor finalizada');
     },
   });
 }
 
 // ===================================================================== CARGAS DE CAMIONES
 export function cargaForm(book) {
-  const cos = laborOptions(book, { onlyCosecha: true });
+  const live = () => store.book || book;
+  const cos = laborOptions(book, { onlyCosecha: true, abiertasPrimero: true });
   const defLab = cos[0] ? cos[0].value : '';
   const lab0 = defLab ? book.labores.find((l) => l['ID labor'] === defLab) : null;
   const plates = unique(book.cargas.slice().reverse().map((c) => c['Camión / patente']).filter(Boolean)).slice(0, 6);
@@ -175,16 +183,21 @@ export function cargaForm(book) {
       { name: 'Campaña', label: 'Campaña', type: 'select', options: () => campOpts(book), required: true },
       { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 2 },
       { type: 'section', label: 'Origen del cereal' },
-      { name: 'ID labor vinculada', label: 'Labor de cosecha', type: 'ref', options: () => cos, empty: 'No hay labores de cosecha cargadas', onChange: (v, set, nv) => { const l = book.labores.find((x) => x['ID labor'] === nv); if (l) { if (l['Cultivo']) set('Cultivo', l['Cultivo']); if (l['Campaña']) set('Campaña', l['Campaña']); } } },
-      { name: 'ID producción vinculada', label: 'Producción', type: 'ref', options: () => prodOptions(book), hint: 'Opcional: si no la elegís, se vincula por campaña, cultivo, campo y lote.' },
+      { name: 'ID labor vinculada', label: 'Labor de cosecha', type: 'ref', options: () => cos, empty: 'No hay labores de cosecha cargadas', onChange: (v, set, nv) => { const l = book.labores.find((x) => x['ID labor'] === nv); if (l) { if (l['Cultivo']) set('Cultivo', l['Cultivo']); if (l['Campaña']) set('Campaña', l['Campaña']); const p = R.produccionDeLabor(live(), l); set('ID producción vinculada', p ? p['ID producción'] : ''); } } },
+      { name: 'ID producción vinculada', label: 'Producción', type: 'ref', options: () => prodOptions(book), hint: 'Se completa sola con la labor. Si la labor todavía no tiene producción, se crea al abrir la carga.' },
       { name: 'Computa producción', label: '¿Suma a la producción?', type: 'chips', options: SI_NO },
       { name: 'Documento / origen', label: 'Documento / origen', type: 'select', options: ['Cosecha directa del lote', 'Carta de porte', 'Remito', 'Ticket de balanza', 'Traslado entre silos', 'Otro'] },
     ],
-    values: { 'Fecha': todayStr(), 'Campaña': lab0 && lab0['Campaña'] ? lab0['Campaña'] : R.suggestCampaign({ tarea: 'Cosecha', cultivo: lab0 ? lab0['Cultivo'] : '' }), 'Cultivo': lab0 && lab0['Cultivo'] ? lab0['Cultivo'] : 'Trigo', 'ID labor vinculada': defLab, 'Computa producción': 'Sí', 'Destino': destinos[0] },
+    values: { 'Fecha': todayStr(), 'Campaña': lab0 && lab0['Campaña'] ? lab0['Campaña'] : R.suggestCampaign({ tarea: 'Cosecha', cultivo: lab0 ? lab0['Cultivo'] : '' }), 'Cultivo': lab0 && lab0['Cultivo'] ? lab0['Cultivo'] : 'Trigo', 'ID labor vinculada': defLab, 'ID producción vinculada': lab0 && R.produccionDeLabor(live(), lab0) ? R.produccionDeLabor(live(), lab0)['ID producción'] : '', 'Computa producción': 'Sí', 'Destino': destinos[0] },
     onSubmit: async (v) => {
-      const rec = compact(R.cargaNewRec(book, v));
-      await store.enqueue([{ t: 'append', tk: 'cargas', rec: { ...emptyRow('cargas'), ...rec } }]);
-      toast('Carga abierta');
+      // La carga queda enganchada a la producción del lote de la labor. Si esa labor todavía no tiene producción (por ejemplo, se
+      // inició antes de que la app las creara sola), se crea acá junto con la carga.
+      const lab = v['ID labor vinculada'] ? live().labores.find((x) => x['ID labor'] === v['ID labor vinculada']) : null;
+      const prodOps = lab ? R.opsProduccion(live(), lab, lab) : [];
+      const prodId = v['ID producción vinculada'] || (lab ? ((R.produccionDeLabor(live(), lab) || {})['ID producción'] || (prodOps[0] && prodOps[0].t === 'append' ? prodOps[0].rec['ID producción'] : '')) : '');
+      const rec = compact(R.cargaNewRec(book, { ...v, 'ID producción vinculada': prodId }));
+      await store.enqueue([...prodOps, { t: 'append', tk: 'cargas', rec: { ...emptyRow('cargas'), ...rec } }]);
+      toast(prodOps.length && prodOps[0].t === 'append' ? 'Carga abierta y producción creada' : 'Carga abierta');
     },
   });
 }
@@ -320,9 +333,9 @@ export function prodForm(book, prod = null) {
       { name: 'Cultivo', label: 'Cultivo', type: 'chips', options: ['Trigo', 'Maíz', 'Soja', 'Centeno'], required: true },
       { name: 'Campaña', label: 'Campaña', type: 'select', options: () => campOpts(book), required: true },
       { name: 'Tipo / época', label: 'Tipo / época', type: 'select', options: () => L(book, 'Tipo / época') },
-      { name: 'Ha cosechadas', label: 'Hectáreas cosechadas', type: 'number', unit: 'ha', required: true },
-      { name: 'Fecha inicio cosecha', label: 'Inicio de cosecha', type: 'date', required: true },
-      { name: 'Fecha fin cosecha', label: 'Fin de cosecha', type: 'date', required: true },
+      { name: 'Ha cosechadas', label: 'Hectáreas cosechadas', type: 'number', unit: 'ha', required: !edit },
+      { name: 'Fecha inicio cosecha', label: 'Inicio de cosecha', type: 'date', required: !edit },
+      { name: 'Fecha fin cosecha', label: 'Fin de cosecha', type: 'date', required: !edit },
       { name: 'ID labor vinculada', label: 'Labor de cosecha', type: 'ref', options: () => laborOptions(book, { onlyCosecha: true }) },
       { type: 'section', label: 'Dato manual (opcional)' },
       { name: 'Producción kg', label: 'Producción total', type: 'number', unit: 'kg', hint: 'Dejalo vacío para usar la suma de las descargas.' },
