@@ -44,7 +44,8 @@ export function toast(msg, tone = 'ok', ms = 2600) {
   t.className = `toast toast-${tone} show`;
   t.textContent = msg;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+  // las confirmaciones ("Labor pausada", "Guardado"…) son discretas y duran poco; los avisos y errores se quedan lo necesario
+  toastTimer = setTimeout(() => t.classList.remove('show'), tone === 'ok' ? Math.min(ms, 1700) : ms);
 }
 
 // ---------------------------------------------------------------- hojas
