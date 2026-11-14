@@ -40,17 +40,18 @@
     (function () { var a = document.getElementById('appbar'); if (!a) return; function m() { document.documentElement.style.setProperty('--appbar-h', a.offsetHeight + 'px'); } m(); addEventListener('resize', m); if (window.ResizeObserver) new ResizeObserver(m).observe(a); })();
   </script>
   <script>
-    // Si la pantalla empieza con el encabezado verde (detail-head), el rebote de arriba se pinta de verde (ver green-top en app.css).
-    // El fondo verde del documento se activa solo estando arriba de todo, para que el rebote de abajo siga siendo crema.
+    // Encabezado verde fijo (ver detail-head en app.css): se mide su alto para dejarle lugar al contenido.
     (function () {
-      var root = document.documentElement;
+      var ro = window.ResizeObserver ? new ResizeObserver(function (e) { set(e[0].target); }) : null, cur = null;
+      function set(el) { document.documentElement.style.setProperty('--dh-h', el.offsetHeight + 'px'); }
       function check() {
-        var v = document.getElementById('view'), g = !!(v && v.querySelector('.page > .detail-head:first-child'));
-        document.body.classList.toggle('green-top', g);
-        root.classList.toggle('green-top', g && window.scrollY < 40);
+        var v = document.getElementById('view'), el = v && v.querySelector('.page > .detail-head:first-child');
+        if (el === cur) return;
+        if (ro && cur) ro.unobserve(cur);
+        cur = el;
+        if (el) { set(el); if (ro) ro.observe(el); }
       }
       document.addEventListener('DOMContentLoaded', function () { var v = document.getElementById('view'); if (v) new MutationObserver(check).observe(v, { childList: true, subtree: true }); check(); });
-      addEventListener('scroll', function () { root.classList.toggle('green-top', document.body.classList.contains('green-top') && window.scrollY < 40); }, { passive: true });
     })();
   </script>
   <main id="view" tabindex="-1"></main>
