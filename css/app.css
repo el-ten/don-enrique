@@ -518,6 +518,13 @@ body.has-fab .toast-ok { bottom: calc(var(--tab-h) + var(--sab) + 80px); }
 .connect-panel { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--line); }
 .connect-panel[hidden] { display: none; }
 
+/* Pantallas con encabezado verde pegado a la barra (Servicios, detalle de un lote, etc.): al rebotar el scroll
+   del iPhone hacia abajo, el hueco que se abre entre la barra fija y el encabezado se ve verde, no crema. */
+@media (max-width: 719px) {
+  html.green-top { background: var(--green-d); }
+  body.green-top { background: linear-gradient(var(--green-d), var(--green-d)) top / 100% calc(var(--appbar-h, 58px) + 40px) no-repeat, var(--bg); }
+}
+
 @media (min-width: 720px) {
   .hero h1 { font-size: 2.6rem; }
   .tabbar { max-width: 720px; left: 50%; transform: translateX(-50%); border-radius: 22px 22px 0 0; border: 1px solid var(--line); border-bottom: 0; }
