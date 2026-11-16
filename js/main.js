@@ -102,7 +102,7 @@ function applyTheme() {
   document.documentElement.dataset.theme = t === 'auto' ? '' : t;
   const dark = t === 'dark' || (t === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
   const m = document.querySelector('meta[name="theme-color"]:not([media])');
-  if (m) m.setAttribute('content', dark ? '#0f1a14' : '#16573f');
+  if (m) m.setAttribute('content', dark ? '#123b2c' : '#16573f');
 }
 window.__applyTheme = applyTheme;
 
