@@ -27,6 +27,21 @@ const TABS = [
 ];
 
 let viewEl, tabbarEl, syncEl, fabEl, titleEl;
+
+// Cápsula de la pestaña activa: se desliza de una pestaña a la otra
+let glider = null;
+function placeGlider(instant) {
+  if (!glider) return;
+  const on = tabbarEl.querySelector('button[aria-current="true"]');
+  if (!on || !on.offsetWidth) { glider.classList.add('off'); return; }
+  const jump = instant || glider.classList.contains('off') || !glider.dataset.placed;
+  if (jump) glider.classList.add('jump');
+  glider.style.setProperty('--gx', (on.offsetLeft - 4) + 'px');
+  glider.style.setProperty('--gw', (on.offsetWidth + 8) + 'px');
+  glider.classList.remove('off');
+  glider.dataset.placed = '1';
+  if (jump) { void glider.offsetWidth; glider.classList.remove('jump'); }
+}
 let current = { name: 'home', params: [] };
 let pendingRender = false;
 
@@ -51,6 +66,7 @@ function renderNow(resetScroll = false) {
   // pestaña activa
   const tab = TAB_OF[name] || 'mas';
   tabbarEl.querySelectorAll('button').forEach((b) => b.setAttribute('aria-current', String(b.dataset.tab === tab)));
+  placeGlider();
   // botón flotante
   fabEl.replaceChildren();
   if (out.fab) {
@@ -110,6 +126,9 @@ async function boot() {
   applyTheme();
   viewEl = $('#view'); tabbarEl = $('#tabbar'); syncEl = $('#sync'); fabEl = $('#fab-slot'); titleEl = $('#brand-title');
   tabbarEl.append(...TABS.map((t) => h('button', { type: 'button', 'data-tab': t.id, onclick: () => go(t.id) }, icon(t.ic, 24), h('span', null, t.label))));
+  glider = h('span', { class: 'tab-glider off', 'aria-hidden': 'true' });
+  tabbarEl.prepend(glider);
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => placeGlider(true)).observe(tabbarEl);
   syncEl.addEventListener('click', () => go('ajustes'));
   await store.init();
   store.subscribe(() => { renderSync(); safeRender(); });
