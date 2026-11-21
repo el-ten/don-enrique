@@ -46,16 +46,24 @@ const campOptsLabor = (book) => campOpts(book).slice(1);
 const estadoDato = (book) => L(book, 'Estado dato');
 
 // ===================================================================== LABORES
-export function laborForm(book, { mode = 'curso', labor = null } = {}) {
+// `seguir` = una labor de cosecha terminada de un lote que quedó a medias: la nueva labor arranca con los mismos datos (lote, cultivo,
+// máquina, operadores) para continuar al día siguiente; la producción del lote es la misma y sigue sumando sola.
+export function laborForm(book, { mode = 'curso', labor = null, seguir = null } = {}) {
   const live = () => store.book || book;
   const edit = mode === 'editar';
   const manual = mode === 'manual' || edit;
+  const nuevo = { 'Campaña': R.suggestCampaign({ tarea: '', cultivo: '' }), 'Estado dato': 'Confirmado', 'Fecha inicio': todayStr(), 'Hora inicio': nowTime(), 'Estado labor': 'En curso' };
   const v0 = labor ? {
     ...labor,
     'Operadores principales': splitList(labor['Operadores principales']),
     'Equipos de apoyo': splitList(labor['Equipos de apoyo']),
     'Operadores de apoyo': splitList(labor['Operadores de apoyo']),
-  } : { 'Campaña': R.suggestCampaign({ tarea: '', cultivo: '' }), 'Estado dato': 'Confirmado', 'Fecha inicio': todayStr(), 'Hora inicio': nowTime(), 'Estado labor': 'En curso' };
+  } : seguir ? {
+    ...nuevo, 'Tarea': seguir['Tarea'], 'Cultivo': seguir['Cultivo'] || '', 'Campaña': seguir['Campaña'] || nuevo['Campaña'], _camp: true,
+    'ID lote vinculado': seguir['ID lote vinculado'] || (R.loteFisico(book, seguir['Campo / cliente'], seguir['Lote']) || {})['ID lote'] || '',
+    'Variedad / híbrido': seguir['Variedad / híbrido'] || '', 'Máquina principal': seguir['Máquina principal'] || '', 'Implemento / equipo': seguir['Implemento / equipo'] || '',
+    'Operadores principales': splitList(seguir['Operadores principales']), 'Equipos de apoyo': splitList(seguir['Equipos de apoyo']), 'Operadores de apoyo': splitList(seguir['Operadores de apoyo']),
+  } : nuevo;
   if (mode === 'manual') { v0['Estado labor'] = 'Terminado'; v0['Fecha fin'] = todayStr(); v0['Hora fin'] = nowTime(); }
   if (labor) v0._camp = true;
   const isT = (...t) => (v) => t.includes(v['Tarea']);
@@ -93,8 +101,8 @@ export function laborForm(book, { mode = 'curso', labor = null } = {}) {
   fields.push({ name: 'Novedades', label: 'Novedades', type: 'textarea', required: (v) => v['Tarea'] === 'Otra', placeholder: 'Roturas, observaciones, lo que haya pasado…' });
 
   return openForm({
-    title: edit ? 'Editar labor' : mode === 'manual' ? 'Cargar labor terminada' : 'Iniciar labor',
-    subtitle: edit ? null : mode === 'manual' ? 'Para registrar un trabajo que ya se hizo.' : 'Se registra con la fecha y hora de ahora. Después podés pausarla y finalizarla.',
+    title: edit ? 'Editar labor' : mode === 'manual' ? 'Cargar labor terminada' : seguir ? 'Seguir con el lote' : 'Iniciar labor',
+    subtitle: edit ? null : mode === 'manual' ? 'Para registrar un trabajo que ya se hizo.' : seguir ? `${R.laborPlace(seguir)}${R.avanceLote(book, seguir) ? ' · ' + R.avanceTexto(R.avanceLote(book, seguir)) : ''}. Mismos datos que la labor anterior; la producción sigue sumando.` : 'Se registra con la fecha y hora de ahora. Después podés pausarla y finalizarla.',
     submitLabel: edit ? 'Guardar cambios' : mode === 'manual' ? 'Guardar labor' : 'Iniciar ahora',
     fields, values: v0,
     onSubmit: async (v) => {
@@ -147,10 +155,16 @@ export function laborForm(book, { mode = 'curso', labor = null } = {}) {
 }
 
 export function finalizarForm(labor) {
+  // Lote de cosecha: se avisa cuánto del lote va hecho con estas hectáreas (si queda a medias, se sigue otro día con otra labor).
+  const avance = (v) => (isBlank(v.ha) || !(Number(v.ha) > 0) ? null : R.avanceLote(store.book, labor, Number(v.ha)));
   return openForm({
     title: 'Finalizar labor', subtitle: `${R.laborTitle(labor)}`,
     submitLabel: 'Finalizar labor', tone: 'primary',
-    fields: [{ name: 'ha', label: 'Hectáreas realizadas', type: 'number', unit: 'ha', required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null), hint: 'Se guarda la fecha y hora de fin de ahora.' }],
+    fields: [
+      { name: 'ha', label: 'Hectáreas realizadas', type: 'number', unit: 'ha', required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null), hint: 'Se guarda la fecha y hora de fin de ahora.' },
+      { type: 'note', tone: 'info', ic: 'map', show: (v) => !!avance(v),
+        text: (v) => { const a = avance(v); return !a ? '' : a.completo ? `${R.avanceTexto(a)}. Con estas hectáreas el lote queda terminado.` : `${R.avanceTexto(a)}. Si lo seguís otro día, iniciá una labor nueva en este lote: los camiones y las hectáreas se suman a la misma producción.`; } },
+    ],
     values: { ha: labor['Ha realizadas'] || null },
     onSubmit: async (v) => {
       const ops = R.labOpsFinalizar(labor, v.ha);
@@ -158,8 +172,9 @@ export function finalizarForm(labor) {
       const serv = R.opsServicio(store.book, { ...labor, ...ops[0].set });
       // labor de cosecha: se completan las hectáreas y la fecha de fin de la producción del lote
       const prod = R.opsProduccion(store.book, { ...labor, ...ops[0].set }, labor);
+      const av = avance(v);
       await store.enqueue([...ops, ...serv, ...prod]);
-      toast(serv.length ? `Labor finalizada y ${serv[0].t === 'update' ? 'sumada a su servicio' : 'cargada en Servicios'}` : prod.length ? 'Labor finalizada y producción actualizada' : 'Labor finalizada');
+      toast(serv.length ? `Labor finalizada y ${serv[0].t === 'update' ? 'sumada a su servicio' : 'cargada en Servicios'}` : av && !av.completo ? `Labor finalizada · quedan ${String(av.resta).replace('.', ',')} ha del lote` : prod.length ? 'Labor finalizada y producción actualizada' : 'Labor finalizada');
     },
   });
 }
@@ -184,6 +199,8 @@ export function cargaForm(book) {
       { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 2 },
       { type: 'section', label: 'Origen del cereal' },
       { name: 'ID labor vinculada', label: 'Labor de cosecha', type: 'ref', options: () => cos, empty: 'No hay labores de cosecha cargadas', onChange: (v, set, nv) => { const l = book.labores.find((x) => x['ID labor'] === nv); if (l) { if (l['Cultivo']) set('Cultivo', l['Cultivo']); if (l['Campaña']) set('Campaña', l['Campaña']); const p = R.produccionDeLabor(live(), l); set('ID producción vinculada', p ? p['ID producción'] : ''); } } },
+      { type: 'note', tone: 'warn', ic: 'alert', text: 'Esa labor ya está terminada. Si el camión se carga con lo que se cosecha hoy, primero iniciá una labor nueva en ese lote (Iniciar labor).',
+        show: (v) => { const l = v['ID labor vinculada'] ? live().labores.find((x) => x['ID labor'] === v['ID labor vinculada']) : null; return !!l && !R.isOpen(l); } },
       { name: 'ID producción vinculada', label: 'Producción', type: 'ref', options: () => prodOptions(book), hint: 'Se completa sola con la labor. Si la labor todavía no tiene producción, se crea al abrir la carga.' },
       { name: 'Computa producción', label: '¿Suma a la producción?', type: 'chips', options: SI_NO },
       { name: 'Documento / origen', label: 'Documento / origen', type: 'select', options: ['Cosecha directa del lote', 'Carta de porte', 'Remito', 'Ticket de balanza', 'Traslado entre silos', 'Otro'] },
@@ -202,29 +219,47 @@ export function cargaForm(book) {
   });
 }
 
+// Lotes entre los que se puede elegir en una descarga (camión que se carga con dos lotes): uno por lote del mismo cultivo y campaña, con
+// la labor del camión para el suyo, o si no con la labor abierta o la más reciente. Si hay un solo lote, no se muestra la pregunta.
+export function loteDescargaOptions(book, carga) {
+  const cos = book.labores.filter((l) => l['Tarea'] === 'Cosecha' && R.laborEsCosechaDeLote(l) && l['Cultivo'] === carga['Cultivo'] && l['Campaña'] === carga['Campaña']);
+  const porLote = new Map();
+  for (const l of cos) { const k = `${norm(l['Campo / cliente'])}|${norm(l['Lote'])}`; (porLote.get(k) || porLote.set(k, []).get(k)).push(l); }
+  const reciente = (a, b) => (`${b['Fecha inicio']} ${b['Hora inicio'] || ''}`).localeCompare(`${a['Fecha inicio']} ${a['Hora inicio'] || ''}`);
+  const elegidas = [...porLote.values()].map((ls) => ls.find((l) => l['ID labor'] === carga['ID labor vinculada']) || ls.filter(R.isOpen).sort(reciente)[0] || ls.sort(reciente)[0]);
+  return elegidas.sort((a, b) => (R.isOpen(b) ? 1 : 0) - (R.isOpen(a) ? 1 : 0) || reciente(a, b))
+    .map((l) => ({ value: l['ID labor'], label: R.laborPlace(l), sub: R.isOpen(l) ? 'Labor en curso' : `Labor terminada${l['Fecha fin'] ? ' el ' + fmtDate(l['Fecha fin']) : ''}` }));
+}
 export function descargaForm(carga) {
   const book = store.book;
   const monos = L(book, 'Monotolva utilizada');
   const cv = R.cargaView(carga, book);
+  const lotes = loteDescargaOptions(book, carga);
+  const propia = lotes.some((o) => o.value === carga['ID labor vinculada']) ? carga['ID labor vinculada'] : '';
   return openForm({
     title: 'Agregar descarga', subtitle: `${carga['Camión / patente']} · ${carga['Cultivo']} → ${carga['Destino']} · hoy lleva ${fmtKg(cv.kgRec)}`,
     submitLabel: 'Guardar descarga',
     fields: [
       { name: 'Kg asignados', label: 'Kilos descargados', type: 'number', unit: 'kg', required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null), hint: (v) => (v['Kg asignados'] ? `Total de la carga: ${fmtKg(cv.kgRec + Number(v['Kg asignados']))}` : '') },
+      { name: 'ID labor vinculada', label: 'Lote de esta descarga', type: 'ref', options: () => lotes, show: () => lotes.length > 1 && !!propia, hint: 'Cambialo solo si esta descarga viene de otro lote distinto al del camión.' },
       { name: 'Monotolva utilizada', label: 'Monotolva utilizada', type: 'chips', options: monos },
       { name: 'ID silo', label: 'Silo (si también va a un silo)', type: 'select', options: () => siloOptions(book), hint: 'Opcional' },
       { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 2 },
     ],
-    values: {},
+    values: { 'ID labor vinculada': propia },
     onSubmit: async (v) => {
       const fresh = store.book.cargas.find((c) => c['ID carga'] === carga['ID carga']);
       if (!fresh || fresh['Estado carga'] !== 'En carga') { toast('La carga ya no está abierta', 'warn'); return false; }
-      await store.enqueue([{ t: 'append', tk: 'movs', rec: compact(descRec(fresh, v)) }]);
-      toast('Descarga guardada');
+      // Descarga de otro lote: lleva su propia labor y producción (si el lote todavía no tiene producción, se crea acá).
+      const lab = v['ID labor vinculada'] && v['ID labor vinculada'] !== fresh['ID labor vinculada'] ? store.book.labores.find((l) => l['ID labor'] === v['ID labor vinculada']) : null;
+      const prodOps = lab ? R.opsProduccion(store.book, lab, lab) : [];
+      const prodId = lab ? ((R.produccionDeLabor(store.book, lab) || {})['ID producción'] || (prodOps[0] && prodOps[0].t === 'append' ? prodOps[0].rec['ID producción'] : '')) : '';
+      await store.enqueue([...prodOps, { t: 'append', tk: 'movs', rec: compact(descRec(fresh, v, lab ? { lab, prodId } : null)) }]);
+      toast(lab ? `Descarga guardada en ${R.laborPlace(lab)}` : 'Descarga guardada');
     },
   });
 }
-const descRec = (c, v) => ({ ...emptyRow('movs'), ...R.descargaNewRec(c, v) });
+const descRec = (c, v, otroLote = null) => ({ ...emptyRow('movs'), ...R.descargaNewRec(c, v, otroLote) });
 
 export function ticketForm(carga) {
   const book = store.book;
@@ -235,7 +270,7 @@ export function ticketForm(carga) {
     fields: [
       { name: 'peso', label: 'Peso del ticket', type: 'number', unit: 'kg', required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null) },
       { name: 'numero', label: 'Número de ticket', type: 'text' },
-      { type: 'note', tone: 'info', ic: 'scale', text: (v) => isBlank(v.peso) ? `Se concilia solo si la diferencia es de hasta ${R.TOL_KG} kg.` : (Math.abs(v.peso - cv.kgRec) <= R.TOL_KG ? `Diferencia ${fmtKg(v.peso - cv.kgRec)}: dentro de la tolerancia, queda Conciliado.` : `Diferencia ${fmtKg(v.peso - cv.kgRec)}: supera ${R.TOL_KG} kg, queda para revisar.`) , show: () => true },
+      { type: 'note', tone: 'info', ic: 'scale', text: (v) => isBlank(v.peso) ? `Se concilia solo si la diferencia es de hasta ${R.TOL_KG} kg.` : (Math.abs(v.peso - cv.kgRec) <= R.TOL_KG ? `Diferencia ${fmtKg(v.peso - cv.kgRec)}: dentro de la tolerancia, queda Conciliado.` : `Diferencia ${fmtKg(v.peso - cv.kgRec)}: supera ${R.TOL_KG} kg. Se guarda igual y queda con un aviso, no como pendiente.`) , show: () => true },
       { name: 'obs', label: 'Observaciones', type: 'textarea', rows: 2 },
     ],
     values: { peso: carga['Peso ticket kg'], numero: carga['Número ticket'] || '', obs: carga['Observaciones'] || '' },

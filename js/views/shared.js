@@ -8,13 +8,15 @@ export function cropBadge(cultivo, ic = 'wheat') {
   return h('span', { class: `crop crop-${R.cropColor(cultivo)}`, title: cultivo || '' }, icon(ic, 22));
 }
 
+// El estado "Revisar diferencia" es el que usa la planilla; en pantalla es un aviso, no una tarea: se muestra "Con diferencia" en ámbar.
+const ESTADO_TEXTO = { 'Revisar diferencia': 'Con diferencia' };
 export function estadoChip(estado) {
   const tone = {
     'En curso': 'live', 'En carga': 'live', Pausada: 'warn', Terminado: 'done', Conciliado: 'ok', Despachado: 'info',
-    'Revisar diferencia': 'err', Cancelado: 'err', Suspendido: 'warn', Planificado: 'info', Reprogramado: 'info', Activo: 'ok', Inactivo: 'neutral',
+    'Revisar diferencia': 'warn', Cancelado: 'err', Suspendido: 'warn', Planificado: 'info', Reprogramado: 'info', Activo: 'ok', Inactivo: 'neutral',
     Confirmado: 'ok', Reconstruido: 'info', Estimado: 'warn', Pendiente: 'warn',
   }[estado] || 'neutral';
-  return chip(estado, tone);
+  return chip(ESTADO_TEXTO[estado] || estado, tone);
 }
 export function datoChip(estado) {
   if (!estado || estado === 'Confirmado') return null;
@@ -52,14 +54,22 @@ export function cargaCard(c, book, onClick) {
       cropBadge(c['Cultivo'], 'truck'),
       h('div', { class: 'grow' },
         h('div', { class: 'title-line' }, h('b', { class: 'ct' }, c['Camión / patente'] || 'Sin patente'), estadoChip(c['Estado carga'])),
-        h('div', { class: 'sub' }, `${c['Cultivo']} → ${c['Destino']}${c['Campo / cliente'] ? ' · ' + c['Campo / cliente'] : ''}${c['Lote'] ? ' — ' + c['Lote'] : ''}`))),
+        h('div', { class: 'sub' }, cv.lotes.length > 1 ? `${c['Cultivo']} → ${c['Destino']} · ${cv.lotes.length} lotes: ${cv.lotes.join(' + ')}` : `${c['Cultivo']} → ${c['Destino']}${c['Campo / cliente'] ? ' · ' + c['Campo / cliente'] : ''}${c['Lote'] ? ' — ' + c['Lote'] : ''}`))),
     h('div', { class: 'meta' },
       h('span', null, icon('calendar', 15), relDay(c['Fecha'])),
       h('span', null, icon('unload', 15), `${cv.descargas} ${cv.descargas === 1 ? 'descarga' : 'descargas'}`),
       h('span', { class: 'strong' }, icon('scale', 15), fmtKg(cv.kgRec)),
-      cv.tieneTicket ? h('span', { class: cv.control === 'Revisar diferencia' ? 'bad' : 'good' }, icon('ticket', 15), `Ticket ${fmtKg(c['Peso ticket kg'])}`) : (c['Estado carga'] !== 'En carga' ? h('span', { class: 'warnx' }, icon('ticket', 15), 'Falta ticket') : null),
+      cv.tieneTicket ? h('span', { class: cv.control === 'Revisar diferencia' ? 'warnx' : 'good' }, icon('ticket', 15), `Ticket ${fmtKg(c['Peso ticket kg'])}`, cv.control === 'Revisar diferencia' ? ` · dif. ${cv.diff > 0 ? '+' : '−'}${fmtKg(Math.abs(cv.diff))}` : '') : (c['Estado carga'] !== 'En carga' ? h('span', { class: 'warnx' }, icon('ticket', 15), 'Falta ticket') : null),
       c._pending ? chip('Sin subir', 'warn', 'cloud') : null),
   ], { onClick });
+}
+
+// Avance de un lote que se cosecha en varios días: "17 de 32 ha · quedan 15 ha" con una barra (av = R.avanceLote).
+export function avanceLoteEl(av) {
+  if (!av) return null;
+  return h('div', { class: 'avance' },
+    h('b', null, R.avanceTexto(av)),
+    h('div', { class: 'gauge slim', role: 'img', 'aria-label': `${av.pct}% del lote` }, h('i', { style: { width: `${av.pct}%` } })));
 }
 
 export function siloCard(s, book, onClick) {

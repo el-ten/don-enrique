@@ -334,6 +334,9 @@ body.sheet-full-open #edge-band { background-color: var(--surface); }
 .gauge span { position: absolute; left: 2px; top: 17px; font-size: .78rem; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
 .gauge.slim { height: 10px; margin-bottom: 0; } .gauge.slim span { display: none; }
 .gauge.neg i { background: var(--red); }
+.avance { display: grid; gap: 8px; margin: 4px 0 2px; }
+.avance > b { font-size: .95rem; font-weight: 700; color: var(--ink); }
+
 
 /* estadísticas */
 .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }

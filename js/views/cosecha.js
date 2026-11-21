@@ -75,19 +75,21 @@ function detail({ id, go, book }) {
   const backTo = () => go('cosecha');
   if (!c) return { node: h('div', { class: 'page' }, detailHead({ title: 'Carga', onBack: backTo }), card([emptyState('truck', 'No encontré esa carga', 'Puede que todavía no se haya sincronizado.')])) };
   const cv = R.cargaView(c, book);
-  const ctl = { 'Dentro de tolerancia': 'ok', 'Revisar diferencia': 'err', 'Pendiente de ticket': 'warn' }[cv.control];
+  // La diferencia grande es un aviso (ámbar), no un error ni algo pendiente: el ticket ya está cargado.
+  const ctl = { 'Dentro de tolerancia': 'ok', 'Revisar diferencia': 'warn', 'Pendiente de ticket': 'warn' }[cv.control];
+  const difTxt = cv.control === 'Revisar diferencia' ? `El ticket pesó ${fmtKg(Math.abs(cv.diff))} ${cv.diff < 0 ? 'menos' : 'más'} que lo cargado` : '';
   const lab = c['ID labor vinculada'] ? book.labores.find((l) => l['ID labor'] === c['ID labor vinculada']) : null;
   const prod = c['ID producción vinculada'] ? book.prod.find((p) => p['ID producción'] === c['ID producción vinculada']) : null;
   return {
     node: h('div', { class: 'page' },
       detailHead({ title: c['Camión / patente'] || 'Carga', sub: `${c['Cultivo']} → ${c['Destino']} · ${fmtDate(c['Fecha'])}`, ic: 'truck', crop: c['Cultivo'], chips: [estadoChip(c['Estado carga']), c._pending ? chip('Sin subir', 'warn', 'cloud') : null], onBack: backTo }),
       h('div', { class: 'stats three' }, statBox('Kg cargados', fmtKg(cv.kgRec)), statBox('Ticket', cv.tieneTicket ? fmtKg(c['Peso ticket kg']) : '—'), statBox('Diferencia', cv.diff === null ? '—' : `${cv.diff > 0 ? '+' : ''}${fmtKg(cv.diff)}`, ctl)),
-      h('div', { class: `control control-${ctl}` }, icon(cv.control === 'Dentro de tolerancia' ? 'checkcircle' : cv.control === 'Revisar diferencia' ? 'alert' : 'hourglass', 20), h('b', null, cv.control), cv.control === 'Revisar diferencia' ? h('span', null, `Supera los ${R.TOL_KG} kg de tolerancia`) : null),
+      h('div', { class: `control control-${ctl}` }, icon(cv.control === 'Dentro de tolerancia' ? 'checkcircle' : cv.control === 'Revisar diferencia' ? 'alert' : 'hourglass', 20), h('b', null, cv.control === 'Revisar diferencia' ? 'Con diferencia' : cv.control), cv.control === 'Revisar diferencia' ? h('span', null, `${difTxt}. Pasa los ${R.TOL_KG} kg de tolerancia: es solo un aviso, no queda nada pendiente.`) : null),
       cargaButtons(c, { size: 'lg', full: true }),
       section('Descargas', cv.movs.length ? cv.movs.map((m) => card([
-        h('div', { class: 'row-top' }, h('span', { class: 'crop crop-silo' }, icon('unload', 22)), h('div', { class: 'grow' }, h('div', { class: 'title-line' }, h('b', { class: 'ct' }, m['Monotolva utilizada'] || 'Descarga'), h('span', { class: 'lit' }, fmtKg(m['Kg asignados']))), h('div', { class: 'sub' }, `${fmtDateShort(m['Fecha'])}${m['ID silo'] ? ' · ' + ((book.silos.find((s) => s['ID silo'] === m['ID silo']) || {})['Nombre silo'] || m['ID silo']) : ''}${m['Observaciones'] ? ' · ' + m['Observaciones'] : ''}`)))])) : card([emptyState('unload', 'Sin descargas todavía', 'Usá "Agregar descarga" cada vez que la tolva descarga en el camión.')])),
+        h('div', { class: 'row-top' }, h('span', { class: 'crop crop-silo' }, icon('unload', 22)), h('div', { class: 'grow' }, h('div', { class: 'title-line' }, h('b', { class: 'ct' }, m['Monotolva utilizada'] || 'Descarga'), h('span', { class: 'lit' }, fmtKg(m['Kg asignados']))), h('div', { class: 'sub' }, `${fmtDateShort(m['Fecha'])}${cv.lotes.length > 1 ? ' · ' + [m['Campo / cliente'], m['Lote']].filter(Boolean).join(' — ') : ''}${m['ID silo'] ? ' · ' + ((book.silos.find((s) => s['ID silo'] === m['ID silo']) || {})['Nombre silo'] || m['ID silo']) : ''}${m['Observaciones'] ? ' · ' + m['Observaciones'] : ''}`)))])) : card([emptyState('unload', 'Sin descargas todavía', 'Usá "Agregar descarga" cada vez que la tolva descarga en el camión.')])),
       section('Datos de la carga', card([
-        kv('Campaña', c['Campaña']), kv('Unidad', c['Unidad']), kv('Campo / cliente', c['Campo / cliente']), kv('Lote', c['Lote']),
+        kv('Campaña', c['Campaña']), kv('Unidad', c['Unidad']), kv('Campo / cliente', cv.lotes.length > 1 ? '' : c['Campo / cliente']), kv(cv.lotes.length > 1 ? 'Lotes' : 'Lote', cv.lotes.length > 1 ? cv.lotes.join(' + ') : c['Lote']),
         kv('Labor', lab ? R.laborTitle(lab) : c['ID labor vinculada']), kv('Producción', prod ? R.prodName(prod) : ''), kv('¿Suma a la producción?', c['Computa producción']),
         kv('Documento / origen', c['Documento / origen']), kv('Número de ticket', c['Número ticket']), kv('Observaciones', c['Observaciones']),
       ])),

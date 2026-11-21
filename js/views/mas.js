@@ -4,7 +4,7 @@ import { h, section, kv, emptyState, button, chip } from '../ui.js';
 import { icon } from '../icons.js';
 import * as R from '../rules.js';
 import * as F from '../forms.js';
-import { siloCard, prodCard, searchBox, pageHead, detailHead, estadoChip, datoChip, card, statBox, laborCard, cropBadge } from './shared.js';
+import { siloCard, prodCard, searchBox, pageHead, detailHead, estadoChip, datoChip, card, statBox, laborCard, cropBadge, avanceLoteEl } from './shared.js';
 import { fmtKg, fmtDate, fmtDateShort, fmtHa, fmt2, fmt0, norm, isBlank, unique, sortEs, relDay } from '../util.js';
 import { selectFilter } from './labores.js';
 
@@ -105,12 +105,16 @@ function prodDetail({ params, go, book }) {
   if (!p) return { node: h('div', { class: 'page' }, detailHead({ title: 'Producción', onBack: backTo }), card([emptyState('seedling', 'No encontré esa producción', '')])) };
   const pv = R.prodView(p, book);
   const lab = p['ID labor vinculada'] ? book.labores.find((l) => l['ID labor'] === p['ID labor vinculada']) : null;
+  // Lote cosechado en varios días: cuántas hectáreas van contra las del lote (solo con labores de cosecha cargadas en la app).
+  const avance = R.avanceLote(book, { 'Tarea': 'Cosecha', 'ID labor': '', 'Estado labor': '', 'Campaña': p['Campaña'], 'Cultivo': p['Cultivo'], 'Campo / cliente': p['Campo / cliente'], 'Lote': p['Lote / condición'] });
+  const parcial = !!avance && !avance.completo;
   return {
     node: h('div', { class: 'page' },
-      detailHead({ title: `${p['Cultivo']} · ${p['Campo / cliente']}`, sub: `${p['Lote / condición']} · ${p['Campaña']}`, ic: 'seedling', crop: p['Cultivo'], chips: [datoChip(p['Estado dato']), p._pending ? chip('Sin subir', 'warn', 'cloud') : null], onBack: backTo }),
-      h('div', { class: 'stats three' }, statBox('Kg finales', fmtKg(pv.kgFinal)), statBox('Camiones', pv.camiones || '—'), statBox('Rinde', pv.rinde === null ? '—' : `${fmt2(pv.rinde)} qq/ha`)),
+      detailHead({ title: `${p['Cultivo']} · ${p['Campo / cliente']}`, sub: `${p['Lote / condición']} · ${p['Campaña']}`, ic: 'seedling', crop: p['Cultivo'], chips: [parcial ? chip('Lote a medias', 'warn') : null, datoChip(p['Estado dato']), p._pending ? chip('Sin subir', 'warn', 'cloud') : null], onBack: backTo }),
+      h('div', { class: 'stats three' }, statBox('Kg finales', fmtKg(pv.kgFinal)), statBox('Camiones', pv.camiones || '—'), statBox(parcial ? 'Rinde parcial' : 'Rinde', pv.rinde === null ? '—' : `${fmt2(pv.rinde)} qq/ha`)),
+      parcial ? h('div', { class: 'card' }, avanceLoteEl(avance)) : null,
       h('div', { class: 'note note-info' }, icon('info', 18), h('span', null, pv.origen)),
-      section('Control', card([kv('Kg cosechados (descargas)', fmtKg(pv.kgCos)), kv('Kg con ticket conciliado', fmtKg(pv.kgOk)), kv('Kg a revisar', pv.kgRev ? fmtKg(pv.kgRev) : ''), kv('Kg directo a silo', pv.kgSilo ? fmtKg(pv.kgSilo) : '')])),
+      section('Control', card([kv('Kg cosechados (descargas)', fmtKg(pv.kgCos)), kv('Kg con ticket conciliado', fmtKg(pv.kgOk)), kv('Kg con diferencia de ticket', pv.kgRev ? fmtKg(pv.kgRev) : ''), kv('Kg directo a silo', pv.kgSilo ? fmtKg(pv.kgSilo) : '')])),
       section('Datos de la producción', card([kv('Hectáreas cosechadas', isBlank(p['Ha cosechadas']) ? '' : fmtHa(p['Ha cosechadas'])), kv('Inicio', fmtDate(p['Fecha inicio cosecha'])), kv('Fin', fmtDate(p['Fecha fin cosecha'])), kv('Unidad', p['Unidad']), kv('Tipo / época', p['Tipo / época']), kv('Dato manual', isBlank(p['Producción kg']) ? '' : fmtKg(p['Producción kg'])), kv('Observaciones', p['Observaciones'])])),
       pv.movs.length ? section(`Descargas (${pv.movs.length})`, pv.movs.slice().sort((a, b) => (b['Fecha'] || '').localeCompare(a['Fecha'] || '')).map((m) => card([h('div', { class: 'row-top' }, h('span', { class: 'crop crop-silo' }, icon('unload', 22)), h('div', { class: 'grow' }, h('div', { class: 'title-line' }, h('b', { class: 'ct' }, m['Monotolva utilizada'] || m['Tipo de movimiento']), h('span', { class: 'lit' }, fmtKg(m['Kg asignados']))), h('div', { class: 'sub' }, `${fmtDateShort(m['Fecha'])} · ${m['Tipo de movimiento']}`)))], { onClick: m['ID carga'] ? () => go(`cosecha/${encodeURIComponent(m['ID carga'])}`) : null }))) : null,
       h('div', { class: 'btn-col' },

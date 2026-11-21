@@ -129,6 +129,7 @@ export function cargaView(c, book) {
   const estado = c['Estado carga'];
   return {
     movs, kgRec, diff, control, tieneTicket,
+    lotes: lotesDeCarga(c, movs),
     descargas: movs.length,
     canAddDescarga: estado === 'En carga',
     canCerrar: estado === 'En carga' && kgRec > 0,
@@ -166,13 +167,16 @@ export function cargaNewRec(book, v) {
   };
 }
 
-export function descargaNewRec(c, v) {
+// `otroLote` (opcional) = { lab, prodId }: la descarga es de otro lote distinto al de la carga (camión con dos lotes). La descarga lleva su
+// propio lote, labor y producción, así cada lote suma sus kilos; el ticket sigue siendo del camión entero.
+export function descargaNewRec(c, v, otroLote = null) {
+  const lab = otroLote && otroLote.lab ? otroLote.lab : null;
   return {
     'ID movimiento': uid8(), 'ID carga': c['ID carga'], 'Campaña': c['Campaña'], 'Fecha': v['Fecha'] || todayStr(),
-    'Unidad': c['Unidad'] || '', 'Campo / cliente': c['Campo / cliente'] || '', 'Lote': c['Lote'] || '', 'Cultivo': c['Cultivo'],
+    'Unidad': lab ? lab['Unidad'] || '' : c['Unidad'] || '', 'Campo / cliente': lab ? lab['Campo / cliente'] || '' : c['Campo / cliente'] || '', 'Lote': lab ? lab['Lote'] || '' : c['Lote'] || '', 'Cultivo': c['Cultivo'],
     'Tipo de movimiento': 'Cosecha a camión', 'Monotolva utilizada': v['Monotolva utilizada'] || '', 'Equipo / recipiente': 'Camión',
     'Kg asignados': Number(v['Kg asignados']), 'Destino / ubicación': c['Destino'] || '',
-    'ID labor vinculada': c['ID labor vinculada'] || '', 'ID producción vinculada': c['ID producción vinculada'] || '',
+    'ID labor vinculada': lab ? lab['ID labor'] : c['ID labor vinculada'] || '', 'ID producción vinculada': lab ? otroLote.prodId || '' : c['ID producción vinculada'] || '',
     'Computa producción': c['Computa producción'] || '', 'Documento / origen': c['Documento / origen'] || '',
     'Observaciones': v['Observaciones'] || '', 'ID silo': v['ID silo'] || '',
   };
@@ -325,6 +329,67 @@ export function opsReconciliarProduccion(base) {
   return ops;
 }
 
+// ------------------------------------------------------------------ LOTES QUE SE COSECHAN EN VARIOS DÍAS
+// Un lote que no se termina en el día se cierra igual: se finaliza la labor del día (con las ha de ese día) y al otro día se inicia
+// otra labor en el mismo lote. La producción es UNA por lote/cultivo/campaña, así que sigue sumando kilos y hectáreas sola.
+export function loteFisico(book, campo, lote) {
+  return ((book && book.lotes) || []).find((x) => norm(x['Campo']) === norm(campo) && norm(x['Lote físico']) === norm(lote)) || null;
+}
+// Avance de un lote: hectáreas ya cosechadas (suma de las labores de cosecha terminadas del lote) contra las ha físicas del lote.
+// `haNueva` = hectáreas que se están por cargar al finalizar esta labor (para mostrar cómo quedaría). null si no hay datos para comparar.
+export function avanceLote(book, l, haNueva = null) {
+  if (!laborEsCosechaDeLote(l)) return null;
+  const lt = loteFisico(book, l['Campo / cliente'], l['Lote']);
+  const fis = lt ? Number(lt['Ha físicas']) || 0 : 0;
+  const otras = ((book && book.labores) || []).filter((x) => x['ID labor'] !== l['ID labor'] && x['Tarea'] === 'Cosecha' && x['Estado labor'] === 'Terminado' && mismoLote(l, x, 'Lote'));
+  const propia = haNueva !== null && haNueva !== undefined ? Number(haNueva) || 0 : (l['Estado labor'] === 'Terminado' ? Number(l['Ha realizadas']) || 0 : 0);
+  const ha = Math.round((sum(otras, (x) => x['Ha realizadas']) + propia) * 100) / 100;
+  if (!(fis > 0) || !(ha > 0)) return null;
+  const resta = Math.round((fis - ha) * 100) / 100;
+  const completo = resta <= Math.max(0.5, fis * 0.02); // las ha de la labor casi nunca coinciden exactas con las del lote
+  return { ha, fis, resta: completo ? 0 : resta, completo, pct: Math.min(100, Math.round((ha * 100) / fis)) };
+}
+export function avanceTexto(av) {
+  if (!av) return '';
+  const f = (n) => String(Math.round(n * 100) / 100).replace('.', ',');
+  return av.completo ? `Lote completo · ${f(av.ha)} de ${f(av.fis)} ha` : `${f(av.ha)} de ${f(av.fis)} ha · quedan ${f(av.resta)} ha`;
+}
+const diasDesde = (fecha, hoy = todayStr()) => Math.round((Date.parse(`${hoy}T12:00:00`) - Date.parse(`${fecha}T12:00:00`)) / 86400000);
+// Lotes que quedaron a medias: la última labor de cosecha del lote ya terminó, el lote no está completo y no hay otra labor abierta en
+// él. Se dejan de mostrar solos a los `dias` días sin actividad (un lote que se dejó sin terminar a propósito no queda para siempre).
+export function lotesAMedias(book, { dias = 10, hoy = todayStr() } = {}) {
+  const cos = ((book && book.labores) || []).filter((l) => l['Tarea'] === 'Cosecha' && laborEsCosechaDeLote(l));
+  const porLote = new Map();
+  for (const l of cos) {
+    const k = [l['Campaña'], l['Cultivo'], l['Campo / cliente'], l['Lote']].map(norm).join('|');
+    (porLote.get(k) || porLote.set(k, []).get(k)).push(l);
+  }
+  const out = [];
+  for (const ls of porLote.values()) {
+    if (ls.some(isOpen)) continue;
+    const term = ls.filter((l) => l['Estado labor'] === 'Terminado');
+    if (!term.length) continue;
+    const ult = term.slice().sort((a, b) => String(a['Fecha fin'] || a['Fecha inicio']).localeCompare(String(b['Fecha fin'] || b['Fecha inicio']))).pop();
+    const fecha = ult['Fecha fin'] || ult['Fecha inicio'];
+    if (!fecha || diasDesde(fecha, hoy) > dias) continue;
+    const av = avanceLote(book, ult);
+    if (av && !av.completo) out.push({ labor: ult, avance: av, fecha });
+  }
+  return out.sort((a, b) => b.fecha.localeCompare(a.fecha));
+}
+
+// Labores en las que cargó un camión: las que tiene vinculadas la carga y las de sus descargas (un camión puede llevar dos lotes).
+export function cargasDeLabor(book, l) {
+  const ids = new Set(book.movs.filter((m) => m['ID labor vinculada'] === l['ID labor'] && m['ID carga']).map((m) => m['ID carga']));
+  return book.cargas.filter((c) => c['ID labor vinculada'] === l['ID labor'] || ids.has(c['ID carga']));
+}
+// Lotes de un camión (según sus descargas; si todavía no tiene, el de la carga): ["Campo — Lote", …]
+export function lotesDeCarga(c, movs) {
+  const nom = (campo, lote) => [campo, lote].filter(Boolean).join(' — ');
+  const de = unique((movs || []).map((m) => nom(m['Campo / cliente'], m['Lote'])).filter(Boolean));
+  return de.length ? de : [nom(c['Campo / cliente'], c['Lote'])].filter(Boolean);
+}
+
 // ------------------------------------------------------------------ COMBUSTIBLE
 const ENTRAN = ['Compra / ingreso', 'Stock inicial', 'Devolución', 'Ajuste positivo'];
 const SALEN = ['Carga a maquinaria', 'Salida a tercero', 'Ajuste negativo'];
@@ -372,7 +437,10 @@ export function recientes(book) {
 }
 export function laboresAbiertas(book) { return book.labores.filter(isOpen); }
 export function cargasEnCurso(book) { return book.cargas.filter((c) => c['Estado carga'] === 'En carga'); }
-export function cargasPendientesTicket(book) { return book.cargas.filter((c) => ['Despachado', 'Revisar diferencia'].includes(c['Estado carga'])); }
+// "Pendiente de ticket" = camión despachado al que todavía le falta el ticket. Un camión con ticket cargado cuya diferencia supera la
+// tolerancia (estado "Revisar diferencia" en la planilla) YA NO es una tarea pendiente: queda como aviso (cargasConDiferencia).
+export function cargasPendientesTicket(book) { return book.cargas.filter((c) => c['Estado carga'] === 'Despachado'); }
+export function cargasConDiferencia(book) { return book.cargas.filter((c) => c['Estado carga'] === 'Revisar diferencia'); }
 
 export function cropColor(c) {
   return { Trigo: 'trigo', Soja: 'soja', Maíz: 'maiz', Centeno: 'centeno' }[c] || 'otro';

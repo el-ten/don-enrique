@@ -4,7 +4,7 @@ import { h, section, emptyState, toast, pickOne, button } from '../ui.js';
 import { icon } from '../icons.js';
 import * as R from '../rules.js';
 import * as F from '../forms.js';
-import { laborCard, cargaCard, cropBadge, estadoChip, siloCard, statBox, card } from './shared.js';
+import { laborCard, cargaCard, cropBadge, estadoChip, siloCard, statBox, card, avanceLoteEl } from './shared.js';
 import { laborButtons, cargaButtons } from './actions.js';
 import { fmtKg, fmtL, fmtDur, fmtHa, fmtDate, relDay, fmt0, todayStr } from '../util.js';
 
@@ -34,6 +34,7 @@ export function render({ go, book }) {
   const abiertas = R.laboresAbiertas(book);
   const cargas = R.cargasEnCurso(book);
   const pend = R.cargasPendientesTicket(book);
+  const aMedias = R.lotesAMedias(book);
   const comb = R.combustibleResumen(book);
   const lastLabs = R.recientes(book).slice(0, 5);
   const silos = book.silos.filter((s) => s['Estado'] !== 'Inactivo');
@@ -82,6 +83,10 @@ export function render({ go, book }) {
       quick,
       section('En marcha', marcha.length ? marcha : card([emptyState('tractor', 'Nada en marcha', 'No hay labores ni camiones abiertos ahora.')])),
       pend.length ? section('Tickets pendientes', h('button', { type: 'button', class: 'card tap row-flex', onclick: () => go('cosecha') }, h('span', { class: 'crop crop-warn' }, icon('ticket', 22)), h('div', { class: 'grow' }, h('b', null, `${pend.length} ${pend.length === 1 ? 'camión espera' : 'camiones esperan'} el ticket`), h('div', { class: 'sub' }, 'Cargá el ticket para conciliar los kilos')), icon('right', 20))) : null,
+      aMedias.length ? section('Lotes por terminar', aMedias.map((x) => h('div', { class: 'card' },
+        h('div', { class: 'row-top' }, cropBadge(x.labor['Cultivo'], 'wheat'), h('div', { class: 'grow' }, h('b', { class: 'ct' }, R.laborPlace(x.labor)), h('div', { class: 'sub' }, `${x.labor['Cultivo']} · última labor ${relDay(x.fecha)}`))),
+        avanceLoteEl(x.avance),
+        h('div', { class: 'btn-col' }, button({ label: 'Seguir con este lote', ic: 'tractor', tone: 'soft', block: true, onClick: () => F.laborForm(book, { seguir: x.labor }) }))))) : null,
       section('Combustible', tanques),
       silos.length ? section('Silos', h('div', { class: 'card tap-card', onclick: () => go('silos'), role: 'button', tabindex: '0' }, h('div', { class: 'row-top' }, h('span', { class: 'crop crop-silo' }, icon('silo', 24)), h('div', { class: 'grow' }, h('b', { class: 'ct' }, 'Stock en silos'), h('div', { class: 'sub' }, `${silos.length} ${silos.length === 1 ? 'silo activo' : 'silos activos'}`)), h('div', { class: 'big-num' }, fmtKg(stockTotal))))) : null,
       section('Últimas labores', lastLabs.length ? lastLabs.map((l) => laborCard(l, () => go(`labores/${encodeURIComponent(l['ID labor'])}`))) : card([emptyState('tractor', 'Todavía no hay labores', 'Iniciá la primera con el botón de arriba.')]),
