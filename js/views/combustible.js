@@ -50,7 +50,7 @@ function list({ go, book }) {
 
 function detail({ id, go, book }) {
   const m = book.comb.find((x) => x['ID movimiento combustible'] === id);
-  const backTo = () => go('combustible');
+  const backTo = () => go('combustible', { volver: true });
   if (!m) return { node: h('div', { class: 'page' }, detailHead({ title: 'Movimiento', onBack: backTo }), card([emptyState('fuel', 'No encontré ese movimiento', 'Puede que todavía no se haya sincronizado.')])) };
   const lab = m['ID labor vinculada'] ? book.labores.find((l) => l['ID labor'] === m['ID labor vinculada']) : null;
   const fijo = R.impactoTanque(m, 'Tanque fijo'), movil = R.impactoTanque(m, 'Tanque móvil'), gen = R.impactoGeneral(m);

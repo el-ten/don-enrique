@@ -51,14 +51,14 @@ function silosList({ go, book }) {
   const stock = book.silos.reduce((a, s) => a + R.siloView(s, book).stock, 0);
   return {
     node: h('div', { class: 'page' },
-      detailHead({ title: 'Silos', sub: `Stock total ${fmtKg(stock)}`, ic: 'silo', crop: '', onBack: () => go('mas') }),
+      detailHead({ title: 'Silos', sub: `Stock total ${fmtKg(stock)}`, ic: 'silo', crop: '', onBack: () => go('mas', { volver: true }) }),
       book.silos.length ? book.silos.map((s) => siloCard(s, book, () => go(`silos/${encodeURIComponent(s['ID silo'])}`))) : card([emptyState('silo', 'Sin silos', 'Creá el primero.')]),
       h('div', { class: 'btn-col' }, button({ label: 'Nuevo silo', ic: 'plus', tone: 'soft', block: true, onClick: () => F.siloForm(book) }))),
   };
 }
 function siloDetail({ params, go, book }) {
   const s = book.silos.find((x) => x['ID silo'] === params[0]);
-  const backTo = () => go('silos');
+  const backTo = () => go('silos', { volver: true });
   if (!s) return { node: h('div', { class: 'page' }, detailHead({ title: 'Silo', onBack: backTo }), card([emptyState('silo', 'No encontré ese silo', '')])) };
   const sv = R.siloView(s, book);
   const movs = [...sv.movs].sort((a, b) => (b['Fecha'] || '').localeCompare(a['Fecha'] || ''));
@@ -91,7 +91,7 @@ function prodList({ go, book }) {
   for (const p of rows()) { const pv = R.prodView(p, book); const t = (totals[p['Cultivo']] ||= { kg: 0, ha: 0 }); t.kg += pv.kgFinal; t.ha += p['Ha cosechadas'] || 0; }
   return {
     node: h('div', { class: 'page' },
-      detailHead({ title: 'Producción', sub: `${book.prod.length} ${book.prod.length === 1 ? 'registro' : 'registros'}`, ic: 'seedling', crop: '', onBack: () => go('mas') }),
+      detailHead({ title: 'Producción', sub: `${book.prod.length} ${book.prod.length === 1 ? 'registro' : 'registros'}`, ic: 'seedling', crop: '', onBack: () => go('mas', { volver: true }) }),
       Object.keys(totals).length ? h('div', { class: 'totals' }, Object.entries(totals).map(([c, t]) => h('div', { class: `total crop-${R.cropColor(c)}` }, h('small', null, c), h('b', null, fmtKg(t.kg)), h('span', null, t.ha > 0 && t.kg > 0 ? `${fmt2(Math.round(t.kg / t.ha) / 100)} qq/ha` : '—')))) : null,
       searchBox(pst.q, (v) => { pst.q = v; draw(); }, 'Buscar cultivo, campo, lote…'),
       h('div', { class: 'filters' }, selectFilter('Campaña', camps, pst.camp, (v) => { pst.camp = v; store.emit(); })),
@@ -101,7 +101,7 @@ function prodList({ go, book }) {
 }
 function prodDetail({ params, go, book }) {
   const p = book.prod.find((x) => x['ID producción'] === params[0]);
-  const backTo = () => go('produccion');
+  const backTo = () => go('produccion', { volver: true });
   if (!p) return { node: h('div', { class: 'page' }, detailHead({ title: 'Producción', onBack: backTo }), card([emptyState('seedling', 'No encontré esa producción', '')])) };
   const pv = R.prodView(p, book);
   const lab = p['ID labor vinculada'] ? book.labores.find((l) => l['ID labor'] === p['ID labor vinculada']) : null;
@@ -136,7 +136,7 @@ function lotesList({ go, book }) {
   draw();
   return {
     node: h('div', { class: 'page' },
-      detailHead({ title: 'Campos y lotes', sub: `${book.lotes.length} lotes`, ic: 'map', crop: '', onBack: () => go('mas') }),
+      detailHead({ title: 'Campos y lotes', sub: `${book.lotes.length} lotes`, ic: 'map', crop: '', onBack: () => go('mas', { volver: true }) }),
       searchBox(lst.q, (v) => { lst.q = v; draw(); }, 'Buscar campo o lote…'),
       h('div', { class: 'filters' }, selectFilter('Unidad', sortEs(unique(book.lotes.map((l) => l['Unidad']))), lst.unidad, (v) => { lst.unidad = v; store.emit(); })),
       listEl),
@@ -145,7 +145,7 @@ function lotesList({ go, book }) {
 }
 function loteDetail({ params, go, book }) {
   const l = book.lotes.find((x) => x['ID lote'] === params[0]);
-  const backTo = () => go('lotes');
+  const backTo = () => go('lotes', { volver: true });
   if (!l) return { node: h('div', { class: 'page' }, detailHead({ title: 'Lote', onBack: backTo }), card([emptyState('map', 'No encontré ese lote', '')])) };
   const labs = R.recientes(book).filter((x) => x['ID lote vinculado'] === l['ID lote']).slice(0, 8);
   return {
@@ -171,11 +171,11 @@ function equiposList({ go, book }) {
     listEl.replaceChildren(...Object.keys(groups).sort((a, b) => a.localeCompare(b, 'es')).flatMap((cat) => [h('h3', { class: 'group-title' }, cat), ...groups[cat].map((a) => card([h('div', { class: 'row-top' }, h('span', { class: 'crop crop-blue' }, icon(a['Categoría'] === 'Tanque de combustible' ? 'fuel' : a['Categoría'] === 'Vehículo' ? 'truck' : 'tractor', 22)), h('div', { class: 'grow' }, h('div', { class: 'title-line' }, h('b', { class: 'ct' }, a['Nombre corto']), datoChip(a['Estado dato'])), h('div', { class: 'sub' }, a['Marca / modelo'] || a['Uso principal'] || '')), !isBlank(a['Horómetro']) ? h('b', { class: 'big-num sm' }, `${fmt0(a['Horómetro'])} hs`) : null)], { onClick: () => go(`equipos/${encodeURIComponent(a['ID activo'])}`) }))]));
   };
   draw();
-  return { node: h('div', { class: 'page' }, detailHead({ title: 'Equipos', sub: `${book.activos.length} equipos`, ic: 'tractor', crop: '', onBack: () => go('mas') }), searchBox(est.q, (v) => { est.q = v; draw(); }, 'Buscar equipo…'), listEl) };
+  return { node: h('div', { class: 'page' }, detailHead({ title: 'Equipos', sub: `${book.activos.length} equipos`, ic: 'tractor', crop: '', onBack: () => go('mas', { volver: true }) }), searchBox(est.q, (v) => { est.q = v; draw(); }, 'Buscar equipo…'), listEl) };
 }
 function equipoDetail({ params, go, book }) {
   const a = book.activos.find((x) => x['ID activo'] === params[0]);
-  const backTo = () => go('equipos');
+  const backTo = () => go('equipos', { volver: true });
   if (!a) return { node: h('div', { class: 'page' }, detailHead({ title: 'Equipo', onBack: backTo }), card([emptyState('tractor', 'No encontré ese equipo', '')])) };
   const labs = R.recientes(book).filter((x) => [x['Máquina principal'], x['Implemento / equipo']].includes(a['Nombre corto'])).slice(0, 6);
   return {

@@ -45,16 +45,33 @@ function placeGlider(instant) {
 let current = { name: 'home', params: [] };
 let pendingRender = false;
 
-export function go(path) { location.hash = '#/' + path.replace(/^#?\/?/, ''); }
-export function back(fallback = 'home') { if (history.length > 1 && document.referrer !== undefined) history.back(); else go(fallback); }
+// Lugar donde quedó cada pantalla al salir (por ruta), para volver exactamente ahí: una lista larga a la que hubo que scrollear, al
+// entrar a una ficha y volver atrás, queda donde estaba. Navegar "hacia adelante" (pestañas, tocar una tarjeta) siempre arranca arriba.
+const scrollGuardado = new Map();
+let rutaActual = '';
+let nav = { propia: false, volver: false }; // propia = el cambio de pantalla lo pidió go(); volver = go() de una flecha "Volver"
+const claveDe = (r) => `${r.name}/${r.params.join('/')}`;
+// `volver: true` = flecha "Volver" de una ficha: va a la pantalla padre y la deja donde se había quedado.
+export function go(path, { volver = false } = {}) {
+  const hash = '#/' + path.replace(/^#?\/?/, '');
+  if (hash === location.hash) return; // misma pantalla: no hay cambio de ruta, así que no se deja ninguna marca pendiente
+  nav = { propia: true, volver };
+  location.hash = hash;
+  setTimeout(() => { nav = { propia: false, volver: false }; }, 300); // por si el navegador no avisó el cambio (ej. misma ruta escrita distinto)
+}
+// Atrás del historial (botón atrás del celular, gesto, o `back`): vuelve a la pantalla anterior en el mismo lugar.
+export function back(fallback = 'home') { if (history.length > 1 && document.referrer !== undefined) history.back(); else go(typeof fallback === 'string' ? fallback : 'home', { volver: true }); }
 window.__go = go;
+// El navegador no debe mover el scroll por su cuenta al cambiar de ruta: lo maneja la app (arriba o donde se había quedado).
+try { history.scrollRestoration = 'manual'; } catch {}
 
 function parseHash() {
   const parts = (location.hash.replace(/^#\/?/, '') || 'home').split('/').filter(Boolean);
   return { name: parts[0] || 'home', params: parts.slice(1).map(decodeURIComponent) };
 }
 
-function renderNow(resetScroll = false) {
+// resetScroll: arriba de todo. aY (número): a ese lugar. Sin ninguno de los dos: se queda donde estaba el scroll.
+function renderNow(resetScroll = false, aY = null) {
   if (!store.config.mode) { renderWelcome(); return; }
   document.body.classList.remove('welcome');
   const { name, params } = current;
@@ -73,7 +90,7 @@ function renderNow(resetScroll = false) {
     fabEl.append(h('button', { class: 'fab', type: 'button', onclick: out.fab.onClick, 'aria-label': out.fab.label }, icon(out.fab.ic || 'plus', 24), h('span', null, out.fab.label)));
   }
   document.body.classList.toggle('has-fab', !!out.fab);
-  if (resetScroll) window.scrollTo(0, 0); else window.scrollTo(0, y);
+  if (aY !== null) window.scrollTo(0, aY); else if (resetScroll) window.scrollTo(0, 0); else window.scrollTo(0, y);
   renderSync();
 }
 
@@ -107,9 +124,14 @@ function renderSync() {
   syncEl.setAttribute('aria-label', `Estado de sincronización: ${text}`);
 }
 
-function route(resetScroll = true) {
+// `volverAlLugar`: la pantalla a la que se llega ya se vio antes (volver atrás) → se deja donde quedó; si no, arranca arriba.
+function route(volverAlLugar = false) {
+  // se guarda dónde quedó la pantalla que se deja (el navegador no mueve el scroll: ver scrollRestoration)
+  if (rutaActual) scrollGuardado.set(rutaActual, window.scrollY);
   current = parseHash();
-  renderNow(resetScroll);
+  rutaActual = claveDe(current);
+  const y = volverAlLugar ? scrollGuardado.get(rutaActual) : undefined;
+  renderNow(y === undefined, y === undefined ? null : y);
 }
 
 function applyTheme() {
@@ -133,8 +155,13 @@ async function boot() {
   await store.init();
   store.subscribe(() => { renderSync(); safeRender(); });
   document.addEventListener('focusout', () => { if (pendingRender) setTimeout(() => { if (!document.activeElement || !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) { pendingRender = false; renderNow(); } }, 60); });
-  window.addEventListener('hashchange', () => route(true));
-  route(true);
+  window.addEventListener('hashchange', () => {
+    // Cambio pedido por go(): arranca arriba, salvo la flecha "Volver". Cualquier otro (atrás del celular, gesto): vuelve al lugar.
+    const alLugar = nav.propia ? nav.volver : true;
+    nav = { propia: false, volver: false };
+    route(alLugar);
+  });
+  route(false);
   startAutoSync();
   if (store.config.mode === 'live') sync({ quiet: true });
   else if (store.config.mode === 'demo' && !store.snapshot) sync();

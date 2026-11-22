@@ -72,7 +72,7 @@ function movCard(m, book, go) {
 
 function detail({ id, go, book }) {
   const c = book.cargas.find((x) => x['ID carga'] === id);
-  const backTo = () => go('cosecha');
+  const backTo = () => go('cosecha', { volver: true });
   if (!c) return { node: h('div', { class: 'page' }, detailHead({ title: 'Carga', onBack: backTo }), card([emptyState('truck', 'No encontré esa carga', 'Puede que todavía no se haya sincronizado.')])) };
   const cv = R.cargaView(c, book);
   // La diferencia grande es un aviso (ámbar), no un error ni algo pendiente: el ticket ya está cargado.

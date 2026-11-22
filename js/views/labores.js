@@ -61,7 +61,7 @@ export function selectFilter(label, options, value, onChange) {
 
 function detail({ id, go, book }) {
   const l = book.labores.find((x) => x['ID labor'] === id);
-  const backTo = () => go('labores');
+  const backTo = () => go('labores', { volver: true });
   if (!l) return { node: h('div', { class: 'page' }, detailHead({ title: 'Labor', onBack: backTo }), card([emptyState('tractor', 'No encontré esa labor', 'Puede que todavía no se haya sincronizado.')])) };
   const hrs = R.laborHoras(l);
   const rend = R.laborRend(l);
