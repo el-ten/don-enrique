@@ -564,6 +564,16 @@ body.has-fab .toast-ok { bottom: calc(var(--tab-h) + var(--sab) + 80px); }
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 
+/* ----- deslizamiento al abrir una ficha / volver (ver main.js, "deslizar") ----- */
+/* la pantalla que entra empieza fuera de la pantalla: sin esto el celular achica la página para que entre todo (y la barra de abajo se va de vista) */
+html.nav-anim, body.nav-anim { overflow-x: clip; }
+.view-ghost { position: fixed; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; background: var(--bg); }
+.view-ghost > * { max-width: 720px; margin-left: auto; margin-right: auto; outline: none; }
+.view-ghost.encima { z-index: 26; }
+#view.entrando { position: relative; z-index: 2; background: var(--bg); min-height: calc(100vh - var(--appbar-h, 58px)); }
+/* el encabezado fijo de las fichas viaja con la pantalla mientras se desliza (una pantalla movida con transform es su propio "marco") */
+@media (max-width: 719px) { body.nav-adelante #view .page > .detail-head:first-child { top: 0; } }
+
 /* ----- facturas: archivo adjunto y visor ----- */
 .file-field { display: flex; flex-direction: column; gap: 10px; }
 .file-card { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--line); }

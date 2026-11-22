@@ -124,14 +124,71 @@ function renderSync() {
   syncEl.setAttribute('aria-label', `Estado de sincronización: ${text}`);
 }
 
+// ---- deslizamiento al abrir una ficha / volver (como un "push" y un "pop" del iPhone) ----
+// Al entrar a una ficha, la pantalla nueva entra deslizándose desde la derecha sobre la anterior; al volver, la ficha sale hacia la
+// derecha y deja ver la lista. Las pestañas no se deslizan (ya tienen la cápsula). La pantalla vieja se copia como "fantasma" (sin
+// eventos) para poder moverla mientras la nueva ya está armada y lista para usar.
+const SUBSECCIONES = ['silos', 'produccion', 'lotes', 'equipos', 'servicios', 'facturas', 'ajustes'];
+const profundidad = (r) => (r.name === 'labores' && r.params[0] === 'nueva' ? 0 : (SUBSECCIONES.includes(r.name) ? 1 : 0) + (r.params.length ? 1 : 0));
+const MS_DESLIZAR = 300;
+let limpiarDeslizar = null;
+const sinMovimiento = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
+// 'adelante' (entra una ficha), 'atras' (sale una ficha) o null (sin animación: pestañas, primera pantalla)
+function direccionDeslizar(vieja, nueva, volver) {
+  if (sinMovimiento() || typeof Element.prototype.animate !== 'function') return null;
+  if (volver) return profundidad(vieja) >= 1 ? 'atras' : null;
+  return profundidad(nueva) >= 1 ? 'adelante' : null;
+}
+function crearFantasma(scrollY) {
+  const g = h('div', { class: 'view-ghost', 'aria-hidden': 'true' });
+  g.setAttribute('inert', '');
+  const copia = viewEl.cloneNode(true);
+  copia.removeAttribute('id'); copia.removeAttribute('tabindex');
+  // misma posición que tenía en la pantalla: debajo de la barra y corrida por lo que se había scrolleado
+  copia.style.marginTop = `${(parseFloat(getComputedStyle(document.body).paddingTop) || 0) - scrollY}px`;
+  g.append(copia);
+  document.body.append(g);
+  return g;
+}
+function deslizar(dir, g) {
+  const opts = { duration: MS_DESLIZAR, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'none' };
+  document.documentElement.classList.add('nav-anim'); document.body.classList.add('nav-anim', `nav-${dir}`);
+  const anims = [];
+  if (dir === 'adelante') {
+    g.classList.add('detras'); viewEl.classList.add('entrando');
+    anims.push(viewEl.animate([{ transform: 'translateX(100%)', boxShadow: '-16px 0 32px rgba(0,0,0,.24)' }, { transform: 'translateX(0)', boxShadow: '-16px 0 32px rgba(0,0,0,0)' }], opts));
+    anims.push(g.animate([{ transform: 'translateX(0)', opacity: 1 }, { transform: 'translateX(-26%)', opacity: .5 }], opts));
+  } else {
+    g.classList.add('encima');
+    anims.push(g.animate([{ transform: 'translateX(0)', boxShadow: '-16px 0 32px rgba(0,0,0,.24)' }, { transform: 'translateX(100%)', boxShadow: '-16px 0 32px rgba(0,0,0,0)' }], opts));
+  }
+  let hecho = false;
+  const limpiar = () => {
+    if (hecho) return; hecho = true;
+    anims.forEach((a) => { try { a.cancel(); } catch {} });
+    g.remove();
+    viewEl.classList.remove('entrando');
+    document.documentElement.classList.remove('nav-anim'); document.body.classList.remove('nav-anim', 'nav-adelante', 'nav-atras');
+    if (limpiarDeslizar === limpiar) limpiarDeslizar = null;
+  };
+  limpiarDeslizar = limpiar;
+  Promise.allSettled(anims.map((a) => a.finished)).then(limpiar);
+  setTimeout(limpiar, MS_DESLIZAR + 200); // por si el navegador no avisa que terminó
+}
+
 // `volverAlLugar`: la pantalla a la que se llega ya se vio antes (volver atrás) → se deja donde quedó; si no, arranca arriba.
 function route(volverAlLugar = false) {
+  const vieja = current, primera = !rutaActual, scrollVieja = window.scrollY;
+  if (limpiarDeslizar) limpiarDeslizar(); // si todavía se estaba deslizando la anterior, se termina de golpe
   // se guarda dónde quedó la pantalla que se deja (el navegador no mueve el scroll: ver scrollRestoration)
   if (rutaActual) scrollGuardado.set(rutaActual, window.scrollY);
   current = parseHash();
   rutaActual = claveDe(current);
   const y = volverAlLugar ? scrollGuardado.get(rutaActual) : undefined;
+  const dir = primera || !store.config.mode ? null : direccionDeslizar(vieja, current, volverAlLugar);
+  const fantasma = dir ? crearFantasma(scrollVieja) : null; // se copia ANTES de reemplazar la pantalla
   renderNow(y === undefined, y === undefined ? null : y);
+  if (fantasma) deslizar(dir, fantasma);
 }
 
 function applyTheme() {
