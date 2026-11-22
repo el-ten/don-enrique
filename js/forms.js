@@ -46,8 +46,9 @@ const campOptsLabor = (book) => campOpts(book).slice(1);
 const estadoDato = (book) => L(book, 'Estado dato');
 
 // ===================================================================== LABORES
-// `seguir` = una labor de cosecha terminada de un lote que quedó a medias: la nueva labor arranca con los mismos datos (lote, cultivo,
-// máquina, operadores) para continuar al día siguiente; la producción del lote es la misma y sigue sumando sola.
+// `seguir` = una labor de cosecha o siembra terminada de un lote que quedó a medias: la nueva labor arranca con los mismos datos (lote,
+// cultivo, variedad, máquina, operadores) para continuar al día siguiente; en cosecha la producción del lote es la misma y sigue sumando
+// sola, y en una siembra de servicio la labor nueva se suma al mismo servicio.
 export function laborForm(book, { mode = 'curso', labor = null, seguir = null } = {}) {
   const live = () => store.book || book;
   const edit = mode === 'editar';
@@ -102,7 +103,7 @@ export function laborForm(book, { mode = 'curso', labor = null, seguir = null } 
 
   return openForm({
     title: edit ? 'Editar labor' : mode === 'manual' ? 'Cargar labor terminada' : seguir ? 'Seguir con el lote' : 'Iniciar labor',
-    subtitle: edit ? null : mode === 'manual' ? 'Para registrar un trabajo que ya se hizo.' : seguir ? `${R.laborPlace(seguir)}${R.avanceLote(book, seguir) ? ' · ' + R.avanceTexto(R.avanceLote(book, seguir)) : ''}. Mismos datos que la labor anterior; la producción sigue sumando.` : 'Se registra con la fecha y hora de ahora. Después podés pausarla y finalizarla.',
+    subtitle: edit ? null : mode === 'manual' ? 'Para registrar un trabajo que ya se hizo.' : seguir ? `${R.laborPlace(seguir)}${R.avanceLote(book, seguir) ? ' · ' + R.avanceTexto(R.avanceLote(book, seguir)) : ''}. Mismos datos que la labor anterior${seguir['Tarea'] === 'Cosecha' ? '; la producción sigue sumando' : R.laborEsServicio(seguir) ? '; se suma al mismo servicio' : ''}.` : 'Se registra con la fecha y hora de ahora. Después podés pausarla y finalizarla.',
     submitLabel: edit ? 'Guardar cambios' : mode === 'manual' ? 'Guardar labor' : 'Iniciar ahora',
     fields, values: v0,
     onSubmit: async (v) => {
@@ -155,7 +156,7 @@ export function laborForm(book, { mode = 'curso', labor = null, seguir = null } 
 }
 
 export function finalizarForm(labor) {
-  // Lote de cosecha: se avisa cuánto del lote va hecho con estas hectáreas (si queda a medias, se sigue otro día con otra labor).
+  // Lote de cosecha o siembra: se avisa cuánto del lote va hecho con estas hectáreas (si queda a medias, se sigue otro día con otra labor).
   const avance = (v) => (isBlank(v.ha) || !(Number(v.ha) > 0) ? null : R.avanceLote(store.book, labor, Number(v.ha)));
   return openForm({
     title: 'Finalizar labor', subtitle: `${R.laborTitle(labor)}`,
@@ -163,7 +164,7 @@ export function finalizarForm(labor) {
     fields: [
       { name: 'ha', label: 'Hectáreas realizadas', type: 'number', unit: 'ha', required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null), hint: 'Se guarda la fecha y hora de fin de ahora.' },
       { type: 'note', tone: 'info', ic: 'map', show: (v) => !!avance(v),
-        text: (v) => { const a = avance(v); return !a ? '' : a.completo ? `${R.avanceTexto(a)}. Con estas hectáreas el lote queda terminado.` : `${R.avanceTexto(a)}. Si lo seguís otro día, iniciá una labor nueva en este lote: los camiones y las hectáreas se suman a la misma producción.`; } },
+        text: (v) => { const a = avance(v); return !a ? '' : a.completo ? `${R.avanceTexto(a)}. Con estas hectáreas el lote queda terminado.` : `${R.avanceTexto(a)}. Si lo seguís otro día, iniciá una labor nueva en este lote${labor['Tarea'] === 'Cosecha' ? ': los camiones y las hectáreas se suman a la misma producción' : R.laborEsServicio(labor) ? ': se suma al mismo servicio' : ''}.`; } },
     ],
     values: { ha: labor['Ha realizadas'] || null },
     onSubmit: async (v) => {
@@ -174,7 +175,8 @@ export function finalizarForm(labor) {
       const prod = R.opsProduccion(store.book, { ...labor, ...ops[0].set }, labor);
       const av = avance(v);
       await store.enqueue([...ops, ...serv, ...prod]);
-      toast(serv.length ? `Labor finalizada y ${serv[0].t === 'update' ? 'sumada a su servicio' : 'cargada en Servicios'}` : av && !av.completo ? `Labor finalizada · quedan ${String(av.resta).replace('.', ',')} ha del lote` : prod.length ? 'Labor finalizada y producción actualizada' : 'Labor finalizada');
+      const quedan = av && !av.completo ? ` · quedan ${String(av.resta).replace('.', ',')} ha del lote` : '';
+      toast(serv.length ? `Labor finalizada y ${serv[0].t === 'update' ? 'sumada a su servicio' : 'cargada en Servicios'}${quedan}` : quedan ? `Labor finalizada${quedan}` : prod.length ? 'Labor finalizada y producción actualizada' : 'Labor finalizada');
     },
   });
 }

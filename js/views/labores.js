@@ -69,9 +69,10 @@ function detail({ id, go, book }) {
   const cargas = R.cargasDeLabor(book, l);
   const prodLabor = l['Tarea'] === 'Cosecha' ? R.produccionDeLabor(book, l) : null;
   const pv = prodLabor ? R.prodView(prodLabor, book) : null;
-  // lote que quedó a medias: se puede seguir otro día con una labor nueva (misma producción)
-  const avance = l['Tarea'] === 'Cosecha' ? R.avanceLote(book, l) : null;
+  // lote que quedó a medias (cosecha o siembra): se puede seguir otro día con una labor nueva (en cosecha, misma producción)
+  const avance = R.laborEsDeLote(l) ? R.avanceLote(book, l) : null;
   const aMedias = avance && !avance.completo ? R.lotesAMedias(book, { dias: 36500 }).find((x) => x.labor['ID labor'] === l['ID labor']) : null;
+  const seguirBtn = (tone) => (aMedias ? button({ label: 'Seguir con este lote', ic: 'tractor', tone, block: true, onClick: () => F.laborForm(book, { seguir: l }) }) : null);
   const fuelL = combs.reduce((a, m) => a + (m['Computa consumo labor'] === 'Sí' ? (m['Litros'] || 0) : 0), 0);
   return {
     node: h('div', { class: 'page' },
@@ -99,8 +100,9 @@ function detail({ id, go, book }) {
         kv('Producción', R.prodName(prodLabor)),
         avanceLoteEl(avance),
         h('div', { class: 'btn-col' },
-          aMedias ? button({ label: 'Seguir con este lote', ic: 'tractor', tone: 'primary', block: true, onClick: () => F.laborForm(book, { seguir: l }) }) : null,
+          seguirBtn('primary'),
           button({ label: 'Ver la producción', ic: 'seedling', tone: 'soft', block: true, onClick: () => go(`produccion/${encodeURIComponent(prodLabor['ID producción'])}`) }))])) : l['Tarea'] === 'Cosecha' && R.laborEsCosechaDeLote(l) ? section('Producción del lote', card([h('p', { class: 'prose' }, 'Todavía no tiene producción: se crea sola al abrir el primer camión o al editar la labor.')])) : null,
+      l['Tarea'] !== 'Cosecha' && avance ? section('Avance del lote', card([avanceLoteEl(avance), aMedias ? h('div', { class: 'btn-col' }, seguirBtn('primary')) : null])) : null,
       l['Novedades'] ? section('Novedades', card([h('p', { class: 'prose' }, l['Novedades'])])) : null,
       combs.length ? section('Combustible vinculado', combs.map((m) => combCard(m, () => go(`combustible/${encodeURIComponent(m['ID movimiento combustible'])}`)))) : null,
       cargas.length ? section('Camiones de esta labor', cargas.map((c) => cargaCard(c, book, () => go(`cosecha/${encodeURIComponent(c['ID carga'])}`)))) : null,

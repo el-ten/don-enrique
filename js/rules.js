@@ -329,39 +329,58 @@ export function opsReconciliarProduccion(base) {
   return ops;
 }
 
-// ------------------------------------------------------------------ LOTES QUE SE COSECHAN EN VARIOS DÍAS
-// Un lote que no se termina en el día se cierra igual: se finaliza la labor del día (con las ha de ese día) y al otro día se inicia
-// otra labor en el mismo lote. La producción es UNA por lote/cultivo/campaña, así que sigue sumando kilos y hectáreas sola.
+// ------------------------------------------------------------------ LOTES QUE SE HACEN EN VARIOS DÍAS (cosecha y siembra)
+// Un lote que no se termina en el día (lluvia, se hizo de noche, se rompió algo) se cierra igual: se finaliza la labor del día (con las
+// ha de ese día) y al otro día se inicia otra labor en el mismo lote. Es lo que ya se hacía en la planilla (dos labores por lote).
+//  · Cosecha: la producción es UNA por lote/cultivo/campaña, así que sigue sumando kilos y hectáreas sola.
+//  · Siembra de un lote de un cliente: la segunda labor se suma al mismo servicio (R.opsServicio).
+// Fertilizar y pulverizar no entran: un mismo lote se pasa varias veces por campaña y no se podría saber si algo quedó a medias.
+const diasDesde = (fecha, hoy = todayStr()) => Math.round((Date.parse(`${hoy}T12:00:00`) - Date.parse(`${fecha}T12:00:00`)) / 86400000);
+export const TAREAS_LOTE = ['Cosecha', 'Siembra'];
+export function laborEsDeLote(l) {
+  return !!l && TAREAS_LOTE.includes(l['Tarea']) && ['Campaña', 'Cultivo', 'Campo / cliente', 'Lote'].every((k) => !isBlank(l[k]));
+}
+const DIAS_OTRO_CULTIVO = 20; // un lote sembrado mitad maíz y mitad soja se siembra en días cercanos; trigo y soja de segunda, no
 export function loteFisico(book, campo, lote) {
   return ((book && book.lotes) || []).find((x) => norm(x['Campo']) === norm(campo) && norm(x['Lote físico']) === norm(lote)) || null;
 }
-// Avance de un lote: hectáreas ya cosechadas (suma de las labores de cosecha terminadas del lote) contra las ha físicas del lote.
+// Avance de un lote: hectáreas ya hechas (suma de las labores terminadas de la misma tarea en el lote) contra las ha físicas del lote.
 // `haNueva` = hectáreas que se están por cargar al finalizar esta labor (para mostrar cómo quedaría). null si no hay datos para comparar.
+// Siembra: si el resto del lote se sembró con otro cultivo en esos días (lote partido), el lote cuenta como completo (`otro` = ha de ese cultivo).
 export function avanceLote(book, l, haNueva = null) {
-  if (!laborEsCosechaDeLote(l)) return null;
+  if (!laborEsDeLote(l)) return null;
   const lt = loteFisico(book, l['Campo / cliente'], l['Lote']);
   const fis = lt ? Number(lt['Ha físicas']) || 0 : 0;
-  const otras = ((book && book.labores) || []).filter((x) => x['ID labor'] !== l['ID labor'] && x['Tarea'] === 'Cosecha' && x['Estado labor'] === 'Terminado' && mismoLote(l, x, 'Lote'));
+  const labs = (book && book.labores) || [];
+  const otras = labs.filter((x) => x['ID labor'] !== l['ID labor'] && x['Tarea'] === l['Tarea'] && x['Estado labor'] === 'Terminado' && mismoLote(l, x, 'Lote'));
   const propia = haNueva !== null && haNueva !== undefined ? Number(haNueva) || 0 : (l['Estado labor'] === 'Terminado' ? Number(l['Ha realizadas']) || 0 : 0);
   const ha = Math.round((sum(otras, (x) => x['Ha realizadas']) + propia) * 100) / 100;
   if (!(fis > 0) || !(ha > 0)) return null;
-  const resta = Math.round((fis - ha) * 100) / 100;
+  let otro = 0;
+  if (l['Tarea'] === 'Siembra') {
+    const f0 = l['Fecha fin'] || l['Fecha inicio'] || todayStr();
+    otro = Math.round(sum(labs.filter((x) => x['Tarea'] === 'Siembra' && x['Estado labor'] === 'Terminado' && norm(x['Campaña']) === norm(l['Campaña']) &&
+      norm(x['Campo / cliente']) === norm(l['Campo / cliente']) && norm(x['Lote']) === norm(l['Lote']) && norm(x['Cultivo']) !== norm(l['Cultivo']) &&
+      Math.abs(diasDesde(x['Fecha fin'] || x['Fecha inicio'] || f0, f0)) <= DIAS_OTRO_CULTIVO), (x) => x['Ha realizadas']) * 100) / 100;
+  }
+  const resta = Math.round((fis - ha - otro) * 100) / 100;
   const completo = resta <= Math.max(0.5, fis * 0.02); // las ha de la labor casi nunca coinciden exactas con las del lote
-  return { ha, fis, resta: completo ? 0 : resta, completo, pct: Math.min(100, Math.round((ha * 100) / fis)) };
+  return { ha, fis, resta: completo ? 0 : resta, completo, otro, pct: Math.min(100, Math.round((ha * 100) / fis)) };
 }
 export function avanceTexto(av) {
   if (!av) return '';
   const f = (n) => String(Math.round(n * 100) / 100).replace('.', ',');
+  if (av.completo && av.otro > 0 && av.ha + 0.5 < av.fis) return `Lote completo · ${f(av.ha)} de ${f(av.fis)} ha (el resto con otro cultivo)`;
   return av.completo ? `Lote completo · ${f(av.ha)} de ${f(av.fis)} ha` : `${f(av.ha)} de ${f(av.fis)} ha · quedan ${f(av.resta)} ha`;
 }
-const diasDesde = (fecha, hoy = todayStr()) => Math.round((Date.parse(`${hoy}T12:00:00`) - Date.parse(`${fecha}T12:00:00`)) / 86400000);
-// Lotes que quedaron a medias: la última labor de cosecha del lote ya terminó, el lote no está completo y no hay otra labor abierta en
-// él. Se dejan de mostrar solos a los `dias` días sin actividad (un lote que se dejó sin terminar a propósito no queda para siempre).
+// Lotes que quedaron a medias: la última labor de la tarea en el lote (cosecha o siembra) ya terminó, el lote no está completo y no hay
+// otra labor abierta de esa tarea en él. Se dejan de mostrar solos a los `dias` días sin actividad (un lote que se dejó sin terminar
+// a propósito no queda para siempre).
 export function lotesAMedias(book, { dias = 10, hoy = todayStr() } = {}) {
-  const cos = ((book && book.labores) || []).filter((l) => l['Tarea'] === 'Cosecha' && laborEsCosechaDeLote(l));
+  const todas = ((book && book.labores) || []).filter(laborEsDeLote);
   const porLote = new Map();
-  for (const l of cos) {
-    const k = [l['Campaña'], l['Cultivo'], l['Campo / cliente'], l['Lote']].map(norm).join('|');
+  for (const l of todas) {
+    const k = [l['Tarea'], l['Campaña'], l['Cultivo'], l['Campo / cliente'], l['Lote']].map(norm).join('|');
     (porLote.get(k) || porLote.set(k, []).get(k)).push(l);
   }
   const out = [];
