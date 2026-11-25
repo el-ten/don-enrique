@@ -1,6 +1,6 @@
 // Pantalla de inicio: lo que está pasando ahora y accesos rápidos.
 import { store } from '../store.js';
-import { h, section, emptyState, toast, pickOne, button } from '../ui.js';
+import { h, section, emptyState, toast, pickOne, button, confirmDialog } from '../ui.js';
 import { icon } from '../icons.js';
 import * as R from '../rules.js';
 import * as F from '../forms.js';
@@ -86,7 +86,9 @@ export function render({ go, book }) {
       aMedias.length ? section('Lotes por terminar', aMedias.map((x) => h('div', { class: 'card' },
         h('div', { class: 'row-top' }, cropBadge(x.labor['Cultivo'], 'wheat'), h('div', { class: 'grow' }, h('b', { class: 'ct' }, R.laborPlace(x.labor)), h('div', { class: 'sub' }, `${x.labor['Tarea']} · ${x.labor['Cultivo']} · última labor ${relDay(x.fecha)}`))),
         avanceLoteEl(x.avance),
-        h('div', { class: 'btn-col' }, button({ label: 'Seguir con este lote', ic: 'tractor', tone: 'soft', block: true, onClick: () => F.laborForm(book, { seguir: x.labor }) }))))) : null,
+        h('div', { class: 'btn-col' },
+          button({ label: 'Seguir con este lote', ic: 'tractor', tone: 'soft', block: true, onClick: () => F.laborForm(book, { seguir: x.labor }) }),
+          button({ label: 'No se sigue', ic: 'check', tone: 'ghost', block: true, onClick: () => cerrarLote(x) }))))) : null,
       section('Combustible', tanques),
       silos.length ? section('Silos', h('div', { class: 'card tap-card', onclick: () => go('silos'), role: 'button', tabindex: '0' }, h('div', { class: 'row-top' }, h('span', { class: 'crop crop-silo' }, icon('silo', 24)), h('div', { class: 'grow' }, h('b', { class: 'ct' }, 'Stock en silos'), h('div', { class: 'sub' }, `${silos.length} ${silos.length === 1 ? 'silo activo' : 'silos activos'}`)), h('div', { class: 'big-num' }, fmtKg(stockTotal))))) : null,
       section('Últimas labores', lastLabs.length ? lastLabs.map((l) => laborCard(l, () => go(`labores/${encodeURIComponent(l['ID labor'])}`))) : card([emptyState('tractor', 'Todavía no hay labores', 'Iniciá la primera con el botón de arriba.')]),
@@ -96,6 +98,18 @@ export function render({ go, book }) {
   };
 }
 
+// "No se sigue": el lote queda a medias a propósito (se dejó así, el resto se hizo de otra forma). Se avisa antes y no se borra nada:
+// solo queda una nota en la labor y el lote deja de figurar en "Lotes por terminar".
+async function cerrarLote(x) {
+  const ok = await confirmDialog({
+    title: 'Dar el lote por terminado',
+    message: `${R.laborPlace(x.labor)}: ${R.avanceTexto(x.avance)}. Deja de figurar en "Lotes por terminar". No se borra ni se cambia nada de las labores; queda una nota en la última. Si después se sigue, igual se puede iniciar una labor nueva.`,
+    confirmLabel: 'No se sigue',
+  });
+  if (!ok) return;
+  await store.enqueue(R.opsCerrarLote(x.labor, x.avance));
+  toast('Listo, el lote ya no figura como por terminar');
+}
 function quickBtn(ic, label, onClick) {
   return h('button', { type: 'button', class: 'q', onclick: onClick }, h('span', { class: 'q-ic' }, icon(ic, 26)), h('span', null, label));
 }

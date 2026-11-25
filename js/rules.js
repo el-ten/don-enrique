@@ -374,9 +374,13 @@ export function avanceTexto(av) {
   return av.completo ? `Lote completo · ${f(av.ha)} de ${f(av.fis)} ha` : `${f(av.ha)} de ${f(av.fis)} ha · quedan ${f(av.resta)} ha`;
 }
 // Lotes que quedaron a medias: la última labor de la tarea en el lote (cosecha o siembra) ya terminó, el lote no está completo y no hay
-// otra labor abierta de esa tarea en él. Se dejan de mostrar solos a los `dias` días sin actividad (un lote que se dejó sin terminar
-// a propósito no queda para siempre).
-export function lotesAMedias(book, { dias = 10, hoy = todayStr() } = {}) {
+// otra labor abierta de esa tarea en él. Un lote con hectáreas sin hacer puede esperar semanas (lluvia, humedad), así que se sigue
+// mostrando hasta los `dias` días (el resto de la campaña) o hasta que alguien lo da por terminado con "No se sigue" (R.opsCerrarLote).
+// `cerrados: true` incluye también los que se dieron por terminados (para ofrecer "Seguir con este lote" en el detalle de la labor).
+export const DIAS_LOTE_A_MEDIAS = 60;
+export const MARCA_LOTE_CERRADO = 'Lote dado por terminado con';
+export const loteCerrado = (l) => String((l && l['Novedades']) || '').includes(MARCA_LOTE_CERRADO);
+export function lotesAMedias(book, { dias = DIAS_LOTE_A_MEDIAS, hoy = todayStr(), cerrados = false } = {}) {
   const todas = ((book && book.labores) || []).filter(laborEsDeLote);
   const porLote = new Map();
   for (const l of todas) {
@@ -391,10 +395,19 @@ export function lotesAMedias(book, { dias = 10, hoy = todayStr() } = {}) {
     const ult = term.slice().sort((a, b) => String(a['Fecha fin'] || a['Fecha inicio']).localeCompare(String(b['Fecha fin'] || b['Fecha inicio']))).pop();
     const fecha = ult['Fecha fin'] || ult['Fecha inicio'];
     if (!fecha || diasDesde(fecha, hoy) > dias) continue;
+    if (!cerrados && loteCerrado(ult)) continue;
     const av = avanceLote(book, ult);
     if (av && !av.completo) out.push({ labor: ult, avance: av, fecha });
   }
   return out.sort((a, b) => b.fecha.localeCompare(a.fecha));
+}
+// Dar por terminado un lote que no se va a seguir: deja una nota en las novedades de su última labor (queda a la vista en la planilla,
+// la ven los demás celulares y se puede borrar desde "Editar labor"). No toca hectáreas, producción ni servicio.
+export function opsCerrarLote(l, av) {
+  if (!l || !l['ID labor'] || loteCerrado(l)) return [];
+  const f = (n) => String(Math.round(n * 100) / 100).replace('.', ',');
+  const nota = `${MARCA_LOTE_CERRADO} ${f(av.ha)} de ${f(av.fis)} ha (no se siguió).`;
+  return [{ t: 'update', tk: 'labores', key: l['ID labor'], set: { 'Novedades': [String(l['Novedades'] || '').trim(), nota].filter(Boolean).join(' ') } }];
 }
 
 // Labores en las que cargó un camión: las que tiene vinculadas la carga y las de sus descargas (un camión puede llevar dos lotes).

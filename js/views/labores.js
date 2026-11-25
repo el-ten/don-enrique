@@ -71,7 +71,7 @@ function detail({ id, go, book }) {
   const pv = prodLabor ? R.prodView(prodLabor, book) : null;
   // lote que quedó a medias (cosecha o siembra): se puede seguir otro día con una labor nueva (en cosecha, misma producción)
   const avance = R.laborEsDeLote(l) ? R.avanceLote(book, l) : null;
-  const aMedias = avance && !avance.completo ? R.lotesAMedias(book, { dias: 36500 }).find((x) => x.labor['ID labor'] === l['ID labor']) : null;
+  const aMedias = avance && !avance.completo ? R.lotesAMedias(book, { dias: 36500, cerrados: true }).find((x) => x.labor['ID labor'] === l['ID labor']) : null;
   const seguirBtn = (tone) => (aMedias ? button({ label: 'Seguir con este lote', ic: 'tractor', tone, block: true, onClick: () => F.laborForm(book, { seguir: l }) }) : null);
   const fuelL = combs.reduce((a, m) => a + (m['Computa consumo labor'] === 'Sí' ? (m['Litros'] || 0) : 0), 0);
   return {
