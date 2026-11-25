@@ -221,6 +221,32 @@ export function cargaForm(book) {
   });
 }
 
+// Editar una carga ya abierta: sobre todo la patente (se anota una provisional mientras el camión se carga y se corrige cuando llega a
+// descargar), y también destino, fecha y observaciones. No se tocan cultivo, labor ni producción: ya hay descargas que dependen de eso.
+export function cargaEditForm(carga) {
+  const book = store.book;
+  const plates = unique(book.cargas.slice().reverse().map((c) => c['Camión / patente']).filter(Boolean)).slice(0, 6);
+  const destinos = unique(['AFA', 'ACA', 'Otro acopio', ...book.cargas.map((c) => c['Destino']).filter(Boolean)]);
+  return openForm({
+    title: 'Editar carga', subtitle: `${carga['Camión / patente'] || 'Sin patente'} · ${carga['Cultivo']} → ${carga['Destino']}`,
+    submitLabel: 'Guardar cambios',
+    fields: [
+      { name: 'Camión / patente', label: 'Camión / patente', type: 'text', upper: true, required: true, suggest: () => plates, placeholder: 'Ej. AB123CD', hint: 'Si anotaste una provisional, acá la cambiás por la patente real.' },
+      { name: 'Destino', label: 'Destino', type: 'select', options: destinos, required: true },
+      { name: 'Fecha', label: 'Fecha', type: 'date', required: true },
+      { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 2 },
+    ],
+    values: { 'Camión / patente': carga['Camión / patente'] || '', 'Destino': carga['Destino'] || '', 'Fecha': carga['Fecha'] || todayStr(), 'Observaciones': carga['Observaciones'] || '' },
+    onSubmit: async (v) => {
+      const fresh = store.book.cargas.find((c) => c['ID carga'] === carga['ID carga']) || carga;
+      const set = diff(fresh, { 'Camión / patente': (v['Camión / patente'] || '').trim().replace(/\s+/g, ' ').toUpperCase(), 'Destino': v['Destino'], 'Fecha': v['Fecha'], 'Observaciones': v['Observaciones'] || '' });
+      if (!Object.keys(set).length) { toast('No cambiaste nada', 'info'); return; }
+      await store.enqueue([{ t: 'update', tk: 'cargas', key: carga['ID carga'], set }]);
+      toast(set['Camión / patente'] ? `Patente guardada: ${set['Camión / patente']}` : 'Cambios guardados');
+    },
+  });
+}
+
 // Lotes entre los que se puede elegir en una descarga (camión que se carga con dos lotes): uno por lote del mismo cultivo y campaña, con
 // la labor del camión para el suyo, o si no con la labor abierta o la más reciente. Si hay un solo lote, no se muestra la pregunta.
 export function loteDescargaOptions(book, carga) {
