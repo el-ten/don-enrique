@@ -264,26 +264,103 @@ export function descargaForm(carga) {
   const cv = R.cargaView(carga, book);
   const lotes = loteDescargaOptions(book, carga);
   const propia = lotes.some((o) => o.value === carga['ID labor vinculada']) ? carga['ID labor vinculada'] : '';
+  // Grano que había quedado en la monotolva de otro día (mismo cultivo y campaña): al descargar se reparte entre su lote y el de hoy.
+  const rems = R.remanentes(book).filter((m) => norm(m['Cultivo']) === norm(carga['Cultivo']) && norm(m['Campaña']) === norm(carga['Campaña']));
+  const labDe = (id) => (id ? book.labores.find((l) => l['ID labor'] === id) : null);
+  const claveLote = (campo, lote) => `${norm(campo)}|${norm(lote)}`;
+  const optDeLote = (campo, lote) => { const o = lotes.find((op) => { const l = labDe(op.value); return l && claveLote(l['Campo / cliente'], l['Lote']) === claveLote(campo, lote); }); return o ? o.value : ''; };
+  const lugarPrincipal = (v) => { const l = labDe(v['ID labor vinculada'] || carga['ID labor vinculada']); return l ? R.laborPlace(l) : [carga['Campo / cliente'], carga['Lote']].filter(Boolean).join(' — '); };
+  const lugarOtro = (v) => { const l = labDe(v['labOtro']); return l ? R.laborPlace(l) : ''; };
+  const remOpts = [...rems.map((m) => ({ value: m['ID movimiento'], label: `${fmtKg(m['Kg asignados'])} · ${R.remanenteLugar(m)}`, sub: `${m['Monotolva utilizada'] || 'Monotolva'} · ${fmtDate(m['Fecha'])}` })), { value: 'manual', label: 'Otro (lo anoto a mano)', sub: '' }];
+  const r0 = rems[0] || null;
+  const puedeDividir = lotes.length > 1 || rems.length > 0;
+  let divAntes = r0 ? 'Sí' : 'No'; // el chip no se puede dejar sin elegir: tocar el que ya está marcado no lo desmarca
   return openForm({
     title: 'Agregar descarga', subtitle: `${carga['Camión / patente']} · ${carga['Cultivo']} → ${carga['Destino']} · hoy lleva ${fmtKg(cv.kgRec)}`,
     submitLabel: 'Guardar descarga',
     fields: [
       { name: 'Kg asignados', label: 'Kilos descargados', type: 'number', unit: 'kg', required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null), hint: (v) => (v['Kg asignados'] ? `Total de la carga: ${fmtKg(cv.kgRec + Number(v['Kg asignados']))}` : '') },
-      { name: 'ID labor vinculada', label: 'Lote de esta descarga', type: 'ref', options: () => lotes, show: () => lotes.length > 1 && !!propia, hint: 'Cambialo solo si esta descarga viene de otro lote distinto al del camión.' },
+      { name: 'ID labor vinculada', label: 'Lote de esta descarga', type: 'ref', options: () => lotes, show: () => lotes.length > 1 && !!propia, hint: (v) => (v['_div'] === 'Sí' ? 'Lo que no venía de antes se anota en este lote.' : 'Cambialo solo si esta descarga viene de otro lote distinto al del camión.') },
+      { name: '_div', label: '¿Trae grano de otro lote o que había quedado de antes?', type: 'chips', options: ['No', 'Sí'], show: () => puedeDividir, onChange: (v, set, nv) => { if (nv === '') set('_div', divAntes); else divAntes = nv; }, hint: 'Si la monotolva traía grano de otro lote, se reparte: lo de antes a su lote y el resto a este.' },
+      { name: '_rem', label: 'Grano que había quedado en la monotolva', type: 'ref', options: () => remOpts, show: (v) => v['_div'] === 'Sí' && rems.length > 0,
+        onChange: (v, set, nv) => { const m = rems.find((x) => x['ID movimiento'] === nv); set('kgOtro', m ? m['Kg asignados'] : ''); set('labOtro', m ? optDeLote(m['Campo / cliente'], m['Lote']) : ''); } },
+      { name: 'labOtro', label: 'Lote del grano que venía de antes', type: 'ref', options: () => lotes, show: (v) => v['_div'] === 'Sí' && lotes.length > 0,
+        required: (v) => v['_div'] === 'Sí', empty: 'No hay otro lote cargado' },
+      { name: 'kgOtro', label: 'Kilos que venían de ese lote', type: 'number', unit: 'kg', show: (v) => v['_div'] === 'Sí', required: (v) => v['_div'] === 'Sí',
+        valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : (!isBlank(v['Kg asignados']) && x > Number(v['Kg asignados']) ? 'No puede ser más que lo descargado' : null)) },
+      { type: 'note', tone: 'info', ic: 'scale', show: (v) => v['_div'] === 'Sí' && !isBlank(v['kgOtro']) && !isBlank(v['Kg asignados']) && !!v['labOtro'],
+        text: (v) => {
+          const T = Number(v['Kg asignados']); const K = Number(v['kgOtro']); const a = lugarOtro(v); const b = lugarPrincipal(v);
+          const l1 = labDe(v['labOtro']); const mismo = l1 && claveLote(l1['Campo / cliente'], l1['Lote']) === claveLote((labDe(v['ID labor vinculada'] || carga['ID labor vinculada']) || carga)['Campo / cliente'], (labDe(v['ID labor vinculada'] || carga['ID labor vinculada']) || carga)['Lote']);
+          if (mismo) return `Es el mismo lote (${a}): se guarda una sola descarga de ${fmtKg(T)}.`;
+          if (K >= T) return `Todo es de ${a}: se guarda una sola descarga de ${fmtKg(T)}.`;
+          return `Se guardan dos descargas: ${fmtKg(K)} de ${a} y ${fmtKg(T - K)} de ${b}. Total ${fmtKg(T)}.`;
+        } },
       { name: 'Monotolva utilizada', label: 'Monotolva utilizada', type: 'chips', options: monos },
       { name: 'ID silo', label: 'Silo (si también va a un silo)', type: 'select', options: () => siloOptions(book), hint: 'Opcional' },
       { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 2 },
     ],
-    values: { 'ID labor vinculada': propia },
+    values: { 'ID labor vinculada': propia, '_div': r0 ? 'Sí' : 'No', '_rem': r0 ? r0['ID movimiento'] : '', 'kgOtro': r0 ? r0['Kg asignados'] : '', 'labOtro': r0 ? optDeLote(r0['Campo / cliente'], r0['Lote']) : '' },
     onSubmit: async (v) => {
       const fresh = store.book.cargas.find((c) => c['ID carga'] === carga['ID carga']);
       if (!fresh || fresh['Estado carga'] !== 'En carga') { toast('La carga ya no está abierta', 'warn'); return false; }
-      // Descarga de otro lote: lleva su propia labor y producción (si el lote todavía no tiene producción, se crea acá).
-      const lab = v['ID labor vinculada'] && v['ID labor vinculada'] !== fresh['ID labor vinculada'] ? store.book.labores.find((l) => l['ID labor'] === v['ID labor vinculada']) : null;
-      const prodOps = lab ? R.opsProduccion(store.book, lab, lab) : [];
-      const prodId = lab ? ((R.produccionDeLabor(store.book, lab) || {})['ID producción'] || (prodOps[0] && prodOps[0].t === 'append' ? prodOps[0].rec['ID producción'] : '')) : '';
-      await store.enqueue([...prodOps, { t: 'append', tk: 'movs', rec: compact(descRec(fresh, v, lab ? { lab, prodId } : null)) }]);
-      toast(lab ? `Descarga guardada en ${R.laborPlace(lab)}` : 'Descarga guardada');
+      const sb = store.book;
+      const T = Number(v['Kg asignados']);
+      const dividir = v['_div'] === 'Sí' && !!v['labOtro'] && Number(v['kgOtro']) > 0;
+      const K = dividir ? Math.min(Number(v['kgOtro']), T) : 0;
+      const labMain = (v['ID labor vinculada'] || fresh['ID labor vinculada']) ? sb.labores.find((l) => l['ID labor'] === (v['ID labor vinculada'] || fresh['ID labor vinculada'])) : null;
+      const labOtro = dividir ? sb.labores.find((l) => l['ID labor'] === v['labOtro']) : null;
+      const lotMain = claveLote(labMain ? labMain['Campo / cliente'] : fresh['Campo / cliente'], labMain ? labMain['Lote'] : fresh['Lote']);
+      const mismo = !!labOtro && claveLote(labOtro['Campo / cliente'], labOtro['Lote']) === lotMain;
+      const rem = dividir && v['_rem'] && v['_rem'] !== 'manual' ? sb.movs.find((m) => m['ID movimiento'] === v['_rem'] && R.esRemanente(m) && isBlank(m['Destino / ubicación'])) : null;
+      // Una descarga de otro lote lleva su propia labor y producción (si el lote todavía no tiene producción, se crea acá).
+      const prodOps = [];
+      const especifica = (lab) => {
+        if (!lab || lab['ID labor'] === fresh['ID labor vinculada']) return null;
+        const ops = R.opsProduccion(sb, lab, lab); prodOps.push(...ops);
+        return { lab, prodId: (R.produccionDeLabor(sb, lab) || {})['ID producción'] || (ops[0] && ops[0].t === 'append' ? ops[0].rec['ID producción'] : '') };
+      };
+      const dd = (f) => String(f || todayStr()).split('-').reverse().slice(0, 2).join('/');
+      const obsOtro = [v['Observaciones'] || '', rem ? `Venía de lo que quedó en la monotolva el ${dd(rem['Fecha'])}` : 'Venía de otro lote'].filter(Boolean).join(' · ');
+      const movs = [];
+      if (!dividir || mismo || K >= T) {
+        // una sola descarga: si todo (o todo lo del lote) es de otro lote, va a ese lote; si era del mismo, queda junto
+        const lab = dividir && !mismo ? labOtro : labMain;
+        movs.push(descRec(fresh, { ...v, 'Kg asignados': T, 'Observaciones': dividir && rem ? obsOtro : v['Observaciones'] }, especifica(lab)));
+      } else {
+        movs.push(descRec(fresh, { ...v, 'Kg asignados': Math.round((T - K) * 100) / 100 }, especifica(labMain)));
+        movs.push(descRec(fresh, { ...v, 'Kg asignados': K, 'Observaciones': obsOtro }, especifica(labOtro)));
+      }
+      const usoRem = rem ? R.opsRemanenteUsado(rem, K, fresh) : [];
+      await store.enqueue([...prodOps, ...movs.map((m) => ({ t: 'append', tk: 'movs', rec: compact(m) })), ...usoRem]);
+      if (movs.length === 2) toast(`Descarga repartida: ${fmtKg(K)} a ${R.laborPlace(labOtro)} y ${fmtKg(T - K)} a ${labMain ? R.laborPlace(labMain) : 'este lote'}`);
+      else { const lab = dividir && !mismo ? labOtro : labMain; toast(lab && lab['ID labor'] !== fresh['ID labor vinculada'] ? `Descarga guardada en ${R.laborPlace(lab)}` : 'Descarga guardada'); }
+    },
+  });
+}
+
+// Grano que quedó en la monotolva al terminar el día (ej. 5.100 kg de un lote): se anota para repartirlo cuando se descargue al camión.
+// No suma a la producción hasta que pase a un camión (ver R.remanentes).
+export function remanenteForm(book) {
+  const cos = laborOptions(book, { onlyCosecha: true, abiertasPrimero: true }).filter((o) => R.laborEsCosechaDeLote(book.labores.find((l) => l['ID labor'] === o.value)));
+  const monos = L(book, 'Monotolva utilizada');
+  return openForm({
+    title: 'Grano que quedó en la monotolva', subtitle: 'Anotalo para repartirlo bien cuando se descargue al camión. No suma a la producción hasta que pase a un camión.',
+    submitLabel: 'Anotar',
+    fields: [
+      { name: 'Kg asignados', label: 'Kilos que quedaron', type: 'number', unit: 'kg', required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null) },
+      { name: 'ID labor vinculada', label: 'De qué lote es', type: 'ref', options: () => cos, required: true, empty: 'No hay labores de cosecha cargadas' },
+      { name: 'Monotolva utilizada', label: 'En qué monotolva', type: 'chips', options: monos },
+      { name: 'Fecha', label: 'Fecha', type: 'date', required: true },
+      { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 2 },
+    ],
+    values: { 'Fecha': todayStr(), 'ID labor vinculada': cos[0] ? cos[0].value : '' },
+    onSubmit: async (v) => {
+      const lab = book.labores.find((l) => l['ID labor'] === v['ID labor vinculada']);
+      if (!lab) { toast('Elegí de qué lote es', 'warn'); return false; }
+      const prodId = (R.produccionDeLabor(store.book, lab) || {})['ID producción'] || '';
+      await store.enqueue([{ t: 'append', tk: 'movs', rec: compact({ ...emptyRow('movs'), ...R.remanenteNewRec(lab, v, prodId) }) }]);
+      toast(`Anotado: ${fmtKg(v['Kg asignados'])} de ${R.laborPlace(lab)} en la monotolva`);
     },
   });
 }

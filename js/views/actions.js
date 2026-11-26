@@ -3,6 +3,10 @@ import { store } from '../store.js';
 import { h, button, toast, confirmDialog } from '../ui.js';
 import * as R from '../rules.js';
 import * as F from '../forms.js';
+import { icon } from '../icons.js';
+import { section } from '../ui.js';
+import { card } from './shared.js';
+import { fmtKg, relDay } from '../util.js';
 
 export function laborButtons(l, { size = 'md' } = {}) {
   const out = [];
@@ -35,4 +39,27 @@ export function cargaButtons(c, { size = 'md', full = false } = {}) {
     },
   }));
   return out.length ? h('div', { class: 'btn-row' }, out) : null;
+}
+
+// Grano que quedó en la monotolva sin pasar todavía a un camión (se muestra en Inicio y en Cosecha). "Ya se usó" lo saca de la lista
+// sin cargar descarga; lo normal es que pase solo al agregar la descarga del camión.
+export function remanenteBloque(book) {
+  const rems = R.remanentes(book);
+  if (!rems.length) return null;
+  return section('Grano en la monotolva', rems.map((m) => card([
+    h('div', { class: 'row-top' },
+      h('span', { class: 'crop crop-silo' }, icon('unload', 22)),
+      h('div', { class: 'grow' },
+        h('div', { class: 'title-line' }, h('b', { class: 'ct' }, R.remanenteLugar(m) || 'Sin lote'), h('span', { class: 'lit' }, fmtKg(m['Kg asignados']))),
+        h('div', { class: 'sub' }, `${m['Monotolva utilizada'] || 'Monotolva'} · ${m['Cultivo'] || ''} · quedó ${relDay(m['Fecha'])} · todavía sin camión`))),
+    h('p', { class: 'prose' }, 'Se reparte solo cuando agregues la descarga de un camión.'),
+    h('div', { class: 'btn-col' }, button({
+      label: 'Ya se usó', ic: 'check', tone: 'ghost', block: true,
+      onClick: async () => {
+        if (await confirmDialog({ title: 'Sacar de la monotolva', message: `${fmtKg(m['Kg asignados'])} de ${R.remanenteLugar(m)}: dejan de figurar como grano en la monotolva. No se borra nada ni se suma a la producción.`, confirmLabel: 'Ya se usó' })) {
+          await store.enqueue(R.opsRemanenteCerrar(m)); toast('Listo, ya no figura en la monotolva');
+        }
+      },
+    })),
+  ])));
 }

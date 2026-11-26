@@ -5,7 +5,7 @@ import { icon } from '../icons.js';
 import * as R from '../rules.js';
 import * as F from '../forms.js';
 import { laborCard, cargaCard, cropBadge, estadoChip, siloCard, statBox, card, avanceLoteEl } from './shared.js';
-import { laborButtons, cargaButtons } from './actions.js';
+import { laborButtons, cargaButtons, remanenteBloque } from './actions.js';
 import { fmtKg, fmtL, fmtDur, fmtHa, fmtDate, relDay, fmt0, todayStr } from '../util.js';
 
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
@@ -83,6 +83,7 @@ export function render({ go, book }) {
       quick,
       section('En marcha', marcha.length ? marcha : card([emptyState('tractor', 'Nada en marcha', 'No hay labores ni camiones abiertos ahora.')])),
       pend.length ? section('Tickets pendientes', h('button', { type: 'button', class: 'card tap row-flex', onclick: () => go('cosecha') }, h('span', { class: 'crop crop-warn' }, icon('ticket', 22)), h('div', { class: 'grow' }, h('b', null, `${pend.length} ${pend.length === 1 ? 'camión espera' : 'camiones esperan'} el ticket`), h('div', { class: 'sub' }, 'Cargá el ticket para conciliar los kilos')), icon('right', 20))) : null,
+      remanenteBloque(book),
       aMedias.length ? section('Lotes por terminar', aMedias.map((x) => h('div', { class: 'card' },
         h('div', { class: 'row-top' }, cropBadge(x.labor['Cultivo'], 'wheat'), h('div', { class: 'grow' }, h('b', { class: 'ct' }, R.laborPlace(x.labor)), h('div', { class: 'sub' }, `${x.labor['Tarea']} · ${x.labor['Cultivo']} · última labor ${relDay(x.fecha)}`))),
         avanceLoteEl(x.avance),

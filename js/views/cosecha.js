@@ -4,7 +4,7 @@ import { icon } from '../icons.js';
 import * as R from '../rules.js';
 import * as F from '../forms.js';
 import { cargaCard, searchBox, pageHead, detailHead, estadoChip, card, statBox } from './shared.js';
-import { cargaButtons } from './actions.js';
+import { cargaButtons, remanenteBloque } from './actions.js';
 import { fmtDate, fmtKg, relDay, norm, isBlank, fmtDateShort } from '../util.js';
 import { selectFilter } from './labores.js';
 
@@ -51,7 +51,9 @@ function list({ go, book }) {
       ], segv, (v) => { st.seg = v; store.emit(); }),
       segv !== 'movs' ? searchBox(st.q, (v) => { st.q = v; draw(); }, 'Buscar patente, cultivo, destino…') : null,
       segv === 'historial' ? h('div', { class: 'filters' }, selectFilter('Campaña', camps, st.camp, (v) => { st.camp = v; store.emit(); })) : null,
-      listEl),
+      listEl,
+      segv === 'carga' ? remanenteBloque(book) : null,
+      segv !== 'movs' ? h('div', { class: 'btn-col' }, button({ label: 'Anotar grano que quedó en la monotolva', ic: 'unload', tone: 'ghost', block: true, onClick: () => F.remanenteForm(book) })) : null),
     fab: { label: 'Nueva carga', ic: 'plus', onClick: () => F.cargaForm(book) },
   };
 }

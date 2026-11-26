@@ -182,6 +182,45 @@ export function descargaNewRec(c, v, otroLote = null) {
   };
 }
 
+// ------------------------------------------------------------------ GRANO QUE QUEDA EN LA MONOTOLVA
+// Al terminar el día puede quedar grano en la monotolva (ej. 5.100 kg de Cipriani — La Tapera). Al día siguiente se le suma grano de otro
+// lote y al descargar al camión hay que repartir: lo que venía de antes va a su lote y el resto al lote nuevo.
+// Se anota en la misma hoja de movimientos (tipo "Cosecha a monotolva", sin camión) con "Computa producción" = No: no suma a la
+// producción ni a "Kg cosechados vinculados" de la planilla (que solo suman las filas con "Sí"). Mientras no tenga destino, está pendiente.
+export const TIPO_REMANENTE = 'Cosecha a monotolva';
+export const esRemanente = (m) => !!m && m['Tipo de movimiento'] === TIPO_REMANENTE && isBlank(m['ID carga']);
+export function remanentes(book) {
+  return ((book && book.movs) || []).filter((m) => esRemanente(m) && isBlank(m['Destino / ubicación']) && Number(m['Kg asignados']) > 0)
+    .sort((a, b) => String(b['Fecha'] || '').localeCompare(String(a['Fecha'] || '')));
+}
+export const remanenteLugar = (m) => [m['Campo / cliente'], m['Lote']].filter(Boolean).join(' — ');
+export function remanenteNewRec(labor, v, prodId = '') {
+  const mono = String(v['Monotolva utilizada'] || '');
+  return {
+    'ID movimiento': uid8(), 'ID carga': '', 'Campaña': labor['Campaña'] || '', 'Fecha': v['Fecha'] || todayStr(), 'Unidad': labor['Unidad'] || '',
+    'Campo / cliente': labor['Campo / cliente'] || '', 'Lote': labor['Lote'] || '', 'Cultivo': labor['Cultivo'] || '',
+    'Tipo de movimiento': TIPO_REMANENTE, 'Monotolva utilizada': mono, 'Equipo / recipiente': ['Comofra', 'Ombú'].includes(mono) ? mono : 'Otro',
+    'Kg asignados': Number(v['Kg asignados']), 'Destino / ubicación': '', 'ID labor vinculada': labor['ID labor'], 'ID producción vinculada': prodId || '',
+    'Computa producción': 'No', 'Documento / origen': 'Quedó en la monotolva', 'Observaciones': v['Observaciones'] || '', 'ID silo': '',
+  };
+}
+// Parte (o todo) de lo que quedaba pasó a un camión: si se usó todo queda con destino (deja de estar pendiente); si no, quedan los kg que sobran.
+export function opsRemanenteUsado(m, kgUsados, carga, fecha = todayStr()) {
+  const resto = Math.round((Number(m['Kg asignados']) - Number(kgUsados)) * 100) / 100;
+  const f = (n) => String(Math.round(n * 100) / 100).replace('.', ',');
+  const dd = String(fecha).split('-').reverse().slice(0, 2).join('/');
+  const nota = resto > 0.5 ? `El ${dd} pasaron ${f(kgUsados)} kg al camión ${carga['Camión / patente']}; quedan ${f(resto)} kg.` : `El ${dd} pasó al camión ${carga['Camión / patente']}.`;
+  const obs = [String(m['Observaciones'] || '').trim(), nota].filter(Boolean).join(' ');
+  const set = resto > 0.5 ? { 'Kg asignados': resto, 'Observaciones': obs } : { 'Destino / ubicación': `Camión ${carga['Camión / patente']}`, 'Observaciones': obs };
+  return [{ t: 'update', tk: 'movs', key: m['ID movimiento'], set }];
+}
+// "Ya se usó" sin cargar descarga (se descargó en otro lado, se tiró, se anotó mal): deja de estar pendiente y no toca nada más.
+export function opsRemanenteCerrar(m, fecha = todayStr()) {
+  const dd = String(fecha).split('-').reverse().slice(0, 2).join('/');
+  const obs = [String(m['Observaciones'] || '').trim(), `Dado por usado el ${dd}.`].filter(Boolean).join(' ');
+  return [{ t: 'update', tk: 'movs', key: m['ID movimiento'], set: { 'Destino / ubicación': 'Ya se usó', 'Observaciones': obs } }];
+}
+
 // ------------------------------------------------------------------ SILOS
 export function siloView(s, book) {
   const prodById = byKey(book.prod, 'ID producción');
