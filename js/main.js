@@ -15,7 +15,7 @@ import * as bienvenida from './views/bienvenida.js';
 
 const routes = {
   home, labores, cosecha, combustible, mas, ajustes,
-  silos: mas, produccion: mas, lotes: mas, equipos: mas, servicios, facturas,
+  silos: mas, produccion: mas, resumen: mas, lotes: mas, equipos: mas, servicios, facturas,
 };
 const TAB_OF = { home: 'home', labores: 'labores', cosecha: 'cosecha', combustible: 'combustible' };
 const TABS = [
@@ -128,7 +128,7 @@ function renderSync() {
 // Al entrar a una ficha, la pantalla nueva entra deslizándose desde la derecha sobre la anterior; al volver, la ficha sale hacia la
 // derecha y deja ver la lista. Las pestañas no se deslizan (ya tienen la cápsula). La pantalla vieja se copia como "fantasma" (sin
 // eventos) para poder moverla mientras la nueva ya está armada y lista para usar.
-const SUBSECCIONES = ['silos', 'produccion', 'lotes', 'equipos', 'servicios', 'facturas', 'ajustes'];
+const SUBSECCIONES = ['silos', 'produccion', 'resumen', 'lotes', 'equipos', 'servicios', 'facturas', 'ajustes'];
 const profundidad = (r) => (r.name === 'labores' && r.params[0] === 'nueva' ? 0 : (SUBSECCIONES.includes(r.name) ? 1 : 0) + (r.params.length ? 1 : 0));
 const MS_DESLIZAR = 300;
 let limpiarDeslizar = null;

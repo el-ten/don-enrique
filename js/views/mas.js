@@ -1,6 +1,6 @@
 // "Más": silos, producción, campos y lotes, equipos.
 import { store } from '../store.js';
-import { h, section, kv, emptyState, button, chip } from '../ui.js';
+import { h, section, kv, emptyState, button, chip, seg } from '../ui.js';
 import { icon } from '../icons.js';
 import * as R from '../rules.js';
 import * as F from '../forms.js';
@@ -12,6 +12,7 @@ export function render(ctx) {
   const { route, params } = ctx;
   if (route === 'silos') return params[0] ? siloDetail(ctx) : silosList(ctx);
   if (route === 'produccion') return params[0] ? prodDetail(ctx) : prodList(ctx);
+  if (route === 'resumen') return resumenView(ctx);
   if (route === 'lotes') return params[0] ? loteDetail(ctx) : lotesList(ctx);
   if (route === 'equipos') return params[0] ? equipoDetail(ctx) : equiposList(ctx);
   return menu(ctx);
@@ -26,6 +27,7 @@ function menu({ go, book }) {
       h('div', { class: 'tiles' },
         tile('silo', 'Silos', `${fmtKg(stock)} en stock`, 'silos', 'gold'),
         tile('seedling', 'Producción', `${book.prod.length} ${book.prod.length === 1 ? 'registro' : 'registros'}`, 'produccion', 'green'),
+        tile('chart', 'Resumen de campaña', resumenSub(book), 'resumen', 'green'),
         tile('map', 'Campos y lotes', `${book.lotes.length} lotes`, 'lotes', 'earth'),
         tile('coin', 'Servicios', book.hasServ ? servSub(book) : 'Tarifas y resumen', 'servicios', 'gold'),
         tile('ticket', 'Facturas', book.hasDocs ? factSub(book) : 'Emitidas y recibidas', 'facturas', 'blue'),
@@ -120,6 +122,63 @@ function prodDetail({ params, go, book }) {
       h('div', { class: 'btn-col' },
         lab ? button({ label: 'Ver la labor de cosecha', ic: 'tractor', tone: 'soft', block: true, onClick: () => go(`labores/${encodeURIComponent(lab['ID labor'])}`) }) : null,
         button({ label: 'Editar producción', ic: 'edit', tone: 'ghost', block: true, onClick: () => F.prodForm(book, p) }))),
+  };
+}
+
+// ---------------------------------------------------------------- RESUMEN DE CAMPAÑA
+// Hectáreas sembradas y cosechadas por cultivo, de una campaña, con el detalle por quién (la SH, David, servicios).
+const rst = { camp: '', grupo: 'todo' };
+const campResumen = (book) => { const cs = R.campaniasResumen(book); return cs.includes(rst.camp) ? rst.camp : cs[0] || ''; };
+function resumenSub(book) {
+  const camp = campResumen(book);
+  if (!camp) return 'Ha sembradas y cosechadas';
+  const t = R.resumenCampania(book, camp).total;
+  return t.sembradas > 0 ? `${camp} · ${fmt0(t.sembradas)} ha sembradas` : `${camp} · ${fmt0(t.cosechadas)} ha cosechadas`;
+}
+const haTxt = (n) => `${fmt2(n)} ha`;
+
+function resumenCultivoCard(c, grupo) {
+  const filas = R.GRUPOS_RESUMEN.filter((g) => c.porGrupo[g.id]);
+  const estado = c.cosechando ? chip('Cosechando ahora', 'live') : c.sembrando ? chip('Sembrando ahora', 'live') : null;
+  const sub = c.sinSiembra ? 'Siembras sin cargar en la app' : grupo === 'serv' ? 'Servicios a terceros' : '';
+  // En "Todo", lo que falta no cuenta los servicios: se aclara en la tarjeta que los tiene, para que la cuenta no parezca no cerrar.
+  const sinServ = grupo === 'todo' && c.porGrupo.serv && c.porGrupo.serv.sembradas > 0;
+  const avance = c.pct === null ? null : h('div', { class: 'rs-avance' },
+    h('div', { class: 'gauge slim', role: 'img', 'aria-label': `${c.pct}% cosechado` }, h('i', { style: { width: `${c.pct}%` } })),
+    h('p', { class: 'rs-falta' }, h('span', null, `${c.pct}% cosechado`), h('b', { class: c.faltan > 0 ? 'warn' : 'ok' }, c.faltan > 0 ? `Faltan ${haTxt(c.faltan)}${sinServ ? ' (sin servicios)' : ''}` : 'Todo cosechado')));
+  return card([
+    h('div', { class: 'row-top' }, cropBadge(c.cultivo),
+      h('div', { class: 'grow' }, h('div', { class: 'title-line' }, h('b', { class: 'ct' }, c.cultivo), estado), sub ? h('div', { class: 'sub' }, sub) : null)),
+    h('div', { class: 'stats' }, statBox('Sembradas', c.sinSiembra ? '—' : haTxt(c.sembradas)), statBox('Cosechadas', haTxt(c.cosechadas))),
+    avance,
+    c.kg > 0 ? h('p', { class: 'rs-prod' }, h('b', null, fmtKg(c.kg)), c.rinde !== null ? ` · rinde ${fmt2(c.rinde)} qq/ha` : '') : null,
+    grupo === 'todo' && filas.length > 1 ? h('div', { class: 'rs-grid', role: 'table' },
+      h('span', { class: 'rs-h' }), h('span', { class: 'rs-h' }, 'Sembradas'), h('span', { class: 'rs-h' }, 'Cosechadas'),
+      ...filas.flatMap((g) => { const v = c.porGrupo[g.id]; return [h('span', { class: 'rs-k' }, g.label), h('span', null, v.sembradas > 0 ? haTxt(v.sembradas) : '—'), h('span', null, haTxt(v.cosechadas))]; })) : null,
+  ], { cls: 'rs-card' });
+}
+
+function resumenView({ go, book }) {
+  const camps = R.campaniasResumen(book);
+  const camp = campResumen(book);
+  const grupo = ['todo', ...R.GRUPOS_RESUMEN.map((g) => g.id)].includes(rst.grupo) ? rst.grupo : 'todo';
+  const rs = R.resumenCampania(book, camp, grupo);
+  const t = rs.total;
+  const grupoTxt = { todo: '', sh: 'campo propio y alquilado', david: 'lotes de David', serv: 'servicios y terceros' }[grupo];
+  return {
+    node: h('div', { class: 'page' },
+      detailHead({ title: 'Resumen de campaña', sub: camp ? `Campaña ${camp}${grupoTxt ? ' · ' + grupoTxt : ''}` : 'Hectáreas por cultivo', ic: 'chart', crop: '', onBack: () => go('mas', { volver: true }) }),
+      camps.length ? seg(camps.map((c) => ({ value: c, label: c })), camp, (v) => { rst.camp = v; store.emit(); }) : null,
+      camps.length ? seg([{ value: 'todo', label: 'Todo' }, ...R.GRUPOS_RESUMEN.map((g) => ({ value: g.id, label: g.label }))], grupo, (v) => { rst.grupo = v; store.emit(); }) : null,
+      rs.cultivos.length ? [
+        h('div', { class: 'stats rs-total' }, statBox('Sembradas', haTxt(t.sembradas)), statBox('Cosechadas', haTxt(t.cosechadas)),
+          t.faltan === null ? null : statBox(grupo === 'todo' ? 'Faltan cosechar (SH y David)' : 'Faltan cosechar', haTxt(t.faltan), t.faltan > 0 ? 'warn' : 'ok')),
+        ...rs.cultivos.map((c) => resumenCultivoCard(c, grupo)),
+        h('div', { class: 'note note-info' }, icon('info', 18), h('span', null,
+          'Sembradas: suma de las labores de Siembra. Cosechadas: las hectáreas de Producción, que se completan al finalizar cada labor de cosecha. ' +
+          (grupo === 'serv' ? 'En servicios no se calcula lo que falta: a veces solo sembramos y cosecha otro.' : grupo === 'todo' ? '"Faltan" cuenta solo lo de la SH y de David; en servicios a veces solo sembramos y cosecha otro.' : ''))),
+        h('div', { class: 'btn-col' }, button({ label: `Ver producciones ${camp}`, ic: 'seedling', tone: 'ghost', block: true, onClick: () => { pst.camp = camp; go('produccion'); } })),
+      ] : card([emptyState('seedling', camp ? 'Sin datos para mostrar' : 'Todavía no hay campañas', camp ? 'No hay siembras ni producciones de este grupo en la campaña.' : 'Cuando haya siembras o cosechas cargadas, el resumen aparece acá.')])),
   };
 }
 

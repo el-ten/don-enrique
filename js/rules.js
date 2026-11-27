@@ -242,6 +242,84 @@ export function stockCargaRec(c, v) {
   };
 }
 
+// ------------------------------------------------------------------ RESUMEN DE CAMPAÑA
+// Hectáreas sembradas y cosechadas por cultivo, contadas como las cuenta el Tablero de la planilla:
+//  · sembradas  = "Ha realizadas" de las labores de Siembra de la campaña (sin las canceladas);
+//  · cosechadas = "Ha cosechadas" de Producción (se completan solas al finalizar la labor de cosecha).
+// Se separan por quién es el lote: la SH (campo propio y alquilado), los de David y los servicios a terceros. En los servicios no se calcula
+// "faltan": muchas veces la SH solo siembra y la cosecha la hace otro, así que lo sembrado no es lo que falta cosechar.
+export const GRUPOS_RESUMEN = [
+  { id: 'sh', label: 'La SH', unidades: ['CP-SH', 'CA-SH'] },
+  { id: 'david', label: 'David', unidades: ['CA-DA'] },
+  { id: 'serv', label: 'Servicios', unidades: ['SER', 'ADM-TERC'] },
+];
+export const grupoDeUnidad = (u) => (GRUPOS_RESUMEN.find((g) => g.unidades.includes(u)) || { id: 'otro' }).id;
+const GRUPOS_CON_FALTAN = ['sh', 'david'];
+
+// Campañas con siembras o producciones, de la más nueva a la más vieja.
+export function campaniasResumen(book) {
+  const cs = new Set();
+  for (const l of (book && book.labores) || []) if (l['Tarea'] === 'Siembra' && !isBlank(l['Campaña'])) cs.add(String(l['Campaña']).trim());
+  for (const p of (book && book.prod) || []) if (!isBlank(p['Campaña'])) cs.add(String(p['Campaña']).trim());
+  return [...cs].sort().reverse();
+}
+
+// grupo: 'todo' | 'sh' | 'david' | 'serv'. Devuelve { camp, grupo, cultivos:[…], total:{ sembradas, cosechadas, faltan } } (faltan = null en servicios).
+export function resumenCampania(book, camp, grupo = 'todo') {
+  const porCultivo = new Map();
+  const cult = (c) => {
+    const k = String(c || '').trim() || 'Sin cultivo';
+    if (!porCultivo.has(k)) porCultivo.set(k, { cultivo: k, g: {}, sembrando: 0, cosechando: 0 });
+    return porCultivo.get(k);
+  };
+  const gr = (x, id) => (x.g[id] ||= { sembradas: 0, cosechadas: 0, kg: 0, haConKg: 0 });
+  for (const l of (book && book.labores) || []) {
+    if (norm(l['Campaña']) !== norm(camp) || l['Estado labor'] === 'Cancelado') continue;
+    if (l['Tarea'] !== 'Siembra' && l['Tarea'] !== 'Cosecha') continue;
+    if (isBlank(l['Cultivo'])) continue;
+    const x = cult(l['Cultivo']);
+    if (isOpen(l)) { if (l['Tarea'] === 'Siembra') x.sembrando += 1; else x.cosechando += 1; }
+    if (l['Tarea'] === 'Siembra') gr(x, grupoDeUnidad(l['Unidad'])).sembradas += Number(l['Ha realizadas']) || 0;
+  }
+  for (const p of (book && book.prod) || []) {
+    if (norm(p['Campaña']) !== norm(camp)) continue;
+    const g = gr(cult(p['Cultivo']), grupoDeUnidad(p['Unidad']));
+    const ha = Number(p['Ha cosechadas']) || 0;
+    const kg = prodView(p, book).kgFinal;
+    g.cosechadas += ha;
+    if (ha > 0 && kg > 0) { g.kg += kg; g.haConKg += ha; }
+  }
+  const ids = grupo === 'todo' ? [...GRUPOS_RESUMEN.map((g) => g.id), 'otro'] : [grupo];
+  const cultivos = [];
+  for (const x of porCultivo.values()) {
+    const porGrupo = {};
+    let sembradas = 0, cosechadas = 0, kg = 0, haConKg = 0, faltan = 0, base = 0, hechas = 0;
+    for (const id of [...GRUPOS_RESUMEN.map((g) => g.id), 'otro']) {
+      const v = x.g[id];
+      if (!v) continue;
+      const falta = v.sembradas > 0 && v.sembradas - v.cosechadas > Math.max(0.5, v.sembradas * 0.02) ? r2(v.sembradas - v.cosechadas) : 0;
+      porGrupo[id] = { sembradas: r2(v.sembradas), cosechadas: r2(v.cosechadas), faltan: GRUPOS_CON_FALTAN.includes(id) ? falta : null };
+      if (!ids.includes(id)) continue;
+      sembradas += v.sembradas; cosechadas += v.cosechadas; kg += v.kg; haConKg += v.haConKg;
+      if (GRUPOS_CON_FALTAN.includes(id)) { faltan += falta; base += v.sembradas; hechas += v.cosechadas; }
+    }
+    if (!(sembradas > 0) && !(cosechadas > 0) && !x.sembrando && !x.cosechando) continue; // no tiene nada en este grupo
+    const conFaltan = grupo !== 'serv' && base > 0;
+    cultivos.push({
+      cultivo: x.cultivo, sembradas: r2(sembradas), cosechadas: r2(cosechadas), kg: Math.round(kg),
+      rinde: haConKg > 0 && kg > 0 ? Math.round(kg / haConKg) / 100 : null,
+      faltan: conFaltan ? r2(faltan) : null, pct: conFaltan ? Math.min(100, Math.round((hechas * 100) / base)) : null,
+      sinSiembra: !(sembradas > 0) && cosechadas > 0, porGrupo, sembrando: x.sembrando, cosechando: x.cosechando,
+    });
+  }
+  cultivos.sort((a, b) => (b.sembradas + b.cosechadas) - (a.sembradas + a.cosechadas) || a.cultivo.localeCompare(b.cultivo, 'es'));
+  const total = {
+    sembradas: r2(sum(cultivos, (c) => c.sembradas)), cosechadas: r2(sum(cultivos, (c) => c.cosechadas)),
+    faltan: cultivos.every((c) => c.faltan === null) ? null : r2(sum(cultivos, (c) => c.faltan || 0)), // null: servicios o campaña sin siembras cargadas
+  };
+  return { camp, grupo, cultivos, total };
+}
+
 // ------------------------------------------------------------------ SILOS
 export function siloView(s, book) {
   const prodById = byKey(book.prod, 'ID producción');

@@ -363,6 +363,20 @@ body.sheet-full-open #edge-band { background-color: var(--surface); }
 .tile-slate .tile-ic { background: var(--slate-l); color: var(--slate); }
 .tile:active { transform: scale(.97); }
 
+/* resumen de campaña */
+.rs-card { display: grid; gap: 12px; }
+.rs-total .stat:nth-child(3) { grid-column: 1 / -1; }
+.rs-avance { display: grid; gap: 6px; }
+.rs-falta { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; font-size: .88rem; color: var(--ink-2); }
+.rs-falta b { font-weight: 700; } .rs-falta b.warn { color: var(--amber); } .rs-falta b.ok { color: var(--green); }
+.rs-prod { font-size: .88rem; color: var(--ink-2); }
+.rs-prod b { color: var(--ink); font-weight: 700; }
+.rs-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 14px; row-gap: 6px; align-items: baseline; padding-top: 10px; border-top: 1px dashed var(--line); font-size: .88rem; }
+.rs-grid > span { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rs-grid > .rs-k { text-align: left; color: var(--ink-2); font-weight: 600; white-space: normal; }
+.rs-grid > .rs-h { font-size: .7rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.page > .seg + .seg { margin-top: -4px; }
+
 /* control de camiones */
 .control { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 12px 14px; border-radius: var(--r-sm); background: var(--amber-l); color: var(--amber); }
 .control > span:not(.ic) { flex-basis: 100%; font-size: .85rem; }
