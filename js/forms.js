@@ -366,6 +366,35 @@ export function remanenteForm(book) {
 }
 const descRec = (c, v, otroLote = null) => ({ ...emptyRow('movs'), ...R.descargaNewRec(c, v, otroLote) });
 
+// Grano que ya estaba guardado de otra campaña (trigo del año pasado) y se carga en este camión. Suma a los kilos del camión pero no a la
+// producción de ningún lote; si se elige el silo, se descuenta de su stock.
+export function stockCargaForm(carga) {
+  const book = store.book;
+  const cv = R.cargaView(carga, book);
+  const antes = R.campaniaAnterior(carga['Campaña']);
+  const camps = unique([antes, ...campOpts(book)]).filter(Boolean);
+  const cult = String(carga['Cultivo'] || 'grano').toLowerCase();
+  return openForm({
+    title: `Sumar ${cult} de campañas anteriores`, subtitle: `${carga['Camión / patente']} · ${carga['Cultivo']} → ${carga['Destino']} · hoy lleva ${fmtKg(cv.kgRec)}`,
+    submitLabel: 'Sumar al camión',
+    fields: [
+      { type: 'note', tone: 'info', ic: 'wheat', text: () => `Es grano que ya estaba guardado de otra cosecha. Suma a los kilos del camión (cuenta para el ticket) pero no a la producción de ningún lote.` },
+      { name: 'Kg asignados', label: 'Kilos', type: 'number', unit: 'kg', required: true, valid: (v, x) => (x <= 0 ? 'Tiene que ser mayor a 0' : null), hint: (v) => (v['Kg asignados'] ? `Total de la carga: ${fmtKg(cv.kgRec + Number(v['Kg asignados']))}` : '') },
+      { name: 'Campaña', label: 'De qué campaña es', type: 'select', options: camps, required: true },
+      { name: 'ID silo', label: 'Silo de donde sale', type: 'select', options: () => siloOptions(book), hint: 'Opcional. Si lo elegís, se descuenta del stock de ese silo.' },
+      { name: 'Fecha', label: 'Fecha', type: 'date', required: true },
+      { name: 'Observaciones', label: 'Observaciones', type: 'textarea', rows: 2 },
+    ],
+    values: { 'Fecha': todayStr(), 'Campaña': antes || camps[0] || '' },
+    onSubmit: async (v) => {
+      const fresh = store.book.cargas.find((c) => c['ID carga'] === carga['ID carga']);
+      if (!fresh || fresh['Estado carga'] !== 'En carga') { toast('La carga ya no está abierta', 'warn'); return false; }
+      await store.enqueue([{ t: 'append', tk: 'movs', rec: compact({ ...emptyRow('movs'), ...R.stockCargaRec(fresh, v) }) }]);
+      toast(`Sumados ${fmtKg(v['Kg asignados'])} de ${fresh['Cultivo']} ${v['Campaña']} al camión`);
+    },
+  });
+}
+
 export function ticketForm(carga) {
   const book = store.book;
   const cv = R.cargaView(carga, book);

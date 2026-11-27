@@ -221,6 +221,27 @@ export function opsRemanenteCerrar(m, fecha = todayStr()) {
   return [{ t: 'update', tk: 'movs', key: m['ID movimiento'], set: { 'Destino / ubicación': 'Ya se usó', 'Observaciones': obs } }];
 }
 
+// ------------------------------------------------------------------ GRANO DE CAMPAÑAS ANTERIORES EN UN CAMIÓN
+// Un camión puede llevar grano que ya estaba guardado (trigo del año pasado, de un silo): suma a los kilos del camión (cuentan para el
+// ticket) pero NO a la producción de ningún lote. Se guarda en la misma hoja de movimientos como "Despacho de stock" con el ID de la carga,
+// la campaña de ese grano y "Computa producción" = No; si se indica el silo, se descuenta de su stock.
+export const esStockAnterior = (m) => !!m && m['Tipo de movimiento'] === 'Despacho de stock' && !isBlank(m['ID carga']);
+export function campaniaAnterior(camp) {
+  const m = /^(\d{4})\/(\d{2})$/.exec(String(camp || '').trim());
+  if (!m) return '';
+  const y = Number(m[1]) - 1;
+  return `${y}/${String((y + 1) % 100).padStart(2, '0')}`;
+}
+export function stockCargaRec(c, v) {
+  return {
+    'ID movimiento': uid8(), 'ID carga': c['ID carga'], 'Campaña': v['Campaña'] || campaniaAnterior(c['Campaña']), 'Fecha': v['Fecha'] || todayStr(),
+    'Unidad': '', 'Campo / cliente': '', 'Lote': '', 'Cultivo': c['Cultivo'],
+    'Tipo de movimiento': 'Despacho de stock', 'Monotolva utilizada': '', 'Equipo / recipiente': 'Camión', 'Kg asignados': Number(v['Kg asignados']),
+    'Destino / ubicación': c['Destino'] || '', 'ID labor vinculada': '', 'ID producción vinculada': '', 'Computa producción': 'No',
+    'Documento / origen': 'Stock de campaña anterior', 'Observaciones': v['Observaciones'] || '', 'ID silo': v['ID silo'] || '',
+  };
+}
+
 // ------------------------------------------------------------------ SILOS
 export function siloView(s, book) {
   const prodById = byKey(book.prod, 'ID producción');
